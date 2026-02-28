@@ -1,9 +1,10 @@
 pandas
 openpyxl
-streamlit
+streamlit==1.44.0
 plotly
 sentence-transformers
 scikit-learn
 umap-learn
 numpy
 scipy
+altair==5.4.1
