@@ -1,0 +1,9 @@
+pandas
+openpyxl
+streamlit
+plotly
+sentence-transformers
+scikit-learn
+umap-learn
+numpy
+scipy
