@@ -300,4 +300,3 @@ elif modo == "🗺️ Cartografía Social":
 
             output = df_filtrado.to_csv(index=False).encode("utf-8")
             st.download_button("⬇ Descargar resultados CSV", output, file_name="resultados_cartografia.csv")
-            )    
