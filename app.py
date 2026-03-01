@@ -329,15 +329,26 @@ if modo == "📋 Encuesta":
                 informe = generar_informe_ia(resumen_para_ia, contexto)
             st.markdown(informe)
 
-            st.subheader("⬇ Descargas")
+           st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
             with col1:
                 buffer_enc = io.BytesIO()
                 df_filtrado.to_excel(buffer_enc, index=False, engine="openpyxl")
                 buffer_enc.seek(0)
-                st.download_button("⬇ Descargar datos Excel", buffer_enc, file_name="resultados_encuesta.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="descarga_encuesta"),
+                st.download_button(
+                    "⬇ Descargar datos Excel",
+                    data=buffer_enc,
+                    file_name="resultados_encuesta.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="descarga_encuesta"
+                )
             with col2:
-                st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_ejecutivo.txt", key="descarga_informe_encuesta")
+                st.download_button(
+                    "⬇ Descargar informe TXT",
+                    data=informe.encode("utf-8"),
+                    file_name="informe_ejecutivo.txt",
+                    key="descarga_informe_encuesta"
+                ))
 
 # ════════════════════════════════════════════════════════════════
 # MÓDULO 2 — CARTOGRAFÍA SOCIAL
@@ -678,6 +689,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
