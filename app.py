@@ -45,7 +45,7 @@ Genera UN título descriptivo de máximo 6 palabras que capture el tema central.
 Responde SOLO con el título, sin explicaciones."""
         try:
             resp = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=20
             )
@@ -67,7 +67,7 @@ Líneas de inversión disponibles:
 Responde SOLO con los nombres exactos de las líneas separados por coma, sin explicaciones."""
     try:
         resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=100
         )
@@ -100,7 +100,7 @@ ALERTAS:
 Máximo 3 puntos por categoría. Si no hay, escribe "No identificados"."""
     try:
         resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500
         )
@@ -451,6 +451,51 @@ elif modo == "🗺️ Cartografía Social":
 
             with st.spinner("Asociando frases a líneas de inversión con IA..."):
                 lineas_inversion_col = []
+                for comp in cols_componentes:
+                    mask = df_result["componente"] == comp
+                    subset = df_result[mask].reset_index(drop=True)
+                    if len(subset) == 0:
+                        continue
+
+                    lineas_disponibles = subset.iloc[0]["lineas_disponibles"]
+                    if not lineas_disponibles:
+                        df_result.loc[mask, "lineas_inversion"] = "Sin líneas definidas"
+                        continue
+
+                    frases_lote = subset["frase"].tolist()
+                    frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(frases_lote))
+                    lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
+
+                    prompt = f"""Eres un experto en planificación territorial.
+Para cada frase numerada, indica a qué líneas de inversión corresponde.
+Líneas disponibles:
+{lineas_str}
+
+Frases:
+{frases_str}
+
+Responde SOLO en este formato exacto, una línea por frase:
+1. Línea A, Línea B
+2. Línea C
+3. Línea A, Línea C
+Sin explicaciones."""
+                    try:
+                        resp = client.chat.completions.create(
+                            model="llama-3.1-8b-instant",
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=500
+                        )
+                        lineas_resp = resp.choices[0].message.content.strip().split("\n")
+                        for i, frase in enumerate(frases_lote):
+                            if i < len(lineas_resp):
+                                linea_limpia = lineas_resp[i].split(". ", 1)[-1].strip()
+                            else:
+                                linea_limpia = "No determinado"
+                            idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
+                            if len(idx) > 0:
+                                df_result.loc[idx[0], "lineas_inversion"] = linea_limpia
+                    except Exception as e:
+                        df_result.loc[mask, "lineas_inversion"] = f"Error: {e}"
                 for _, row in df_result.iterrows():
                     if row["lineas_disponibles"]:
                         asoc = asociar_lineas_inversion(row["frase"], row["lineas_disponibles"], contexto)
@@ -612,5 +657,6 @@ Frases más representativas:
                 st.download_button("Descargar datos CSV", df_filtrado[cols_descarga].to_csv(index=False).encode("utf-8"), file_name="resultados_cartografia.csv")
             with col2:
                 st.download_button("Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
