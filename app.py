@@ -45,7 +45,7 @@ Genera UN título descriptivo de máximo 6 palabras que capture el tema central.
 Responde SOLO con el título, sin explicaciones."""
         try:
             resp = client.chat.completions.create(
-                llama-3.1-8b-instant",
+                "llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=20
             )
@@ -67,7 +67,7 @@ Líneas de inversión disponibles:
 Responde SOLO con los nombres exactos de las líneas separados por coma, sin explicaciones."""
     try:
         resp = client.chat.completions.create(
-            llama-3.1-8b-instant",
+            "llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=100
         )
@@ -100,7 +100,7 @@ ALERTAS:
 Máximo 3 puntos por categoría. Si no hay, escribe "No identificados"."""
     try:
         resp = client.chat.completions.create(
-            llama-3.1-8b-instant",
+            "llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500
         )
@@ -657,6 +657,7 @@ Frases más representativas:
                 st.download_button("Descargar datos CSV", df_filtrado[cols_descarga].to_csv(index=False).encode("utf-8"), file_name="resultados_cartografia.csv")
             with col2:
                 st.download_button("Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
