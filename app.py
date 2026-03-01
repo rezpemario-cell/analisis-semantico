@@ -328,8 +328,7 @@ if modo == "📋 Encuesta":
             with st.spinner("Generando informe con IA..."):
                 informe = generar_informe_ia(resumen_para_ia, contexto)
             st.markdown(informe)
-
-           
+            
            st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
             with col1:
@@ -690,6 +689,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
