@@ -215,10 +215,14 @@ if modo == "📋 Encuesta":
             with st.spinner("Etiquetando grupos con IA..."):
                 etiquetas = etiquetar_grupos_ia(frases_por_grupo, contexto)
                 df["cluster"] = df["cluster_num"].map(etiquetas)
-                umap_model = UMAP(n_components=2, random_state=42)
-                coords = umap_model.fit_transform(vectores)
-                df["x"] = coords[:, 0]
-                df["y"] = coords[:, 1]
+                if len(vectores) >= 10:
+                    umap_model = UMAP(n_components=2, random_state=42)
+                    coords = umap_model.fit_transform(vectores)
+                    df["x"] = coords[:, 0]
+                    df["y"] = coords[:, 1]
+                else:
+                    df["x"] = np.random.rand(len(vectores))
+                    df["y"] = np.random.rand(len(vectores))
 
             st.success("Análisis completado.")
 
@@ -664,6 +668,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
