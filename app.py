@@ -235,7 +235,7 @@ if modo == "📋 Encuesta":
             st.session_state.resultados_encuesta = df
             st.session_state.informe_encuesta = None
             st.success("Análisis completado.")
-            st.session_state.resultados_encuesta = df_filtrado
+            st.session_state.resultados_encuesta = df
             st.subheader("🔎 Detección de subregistro")
             for a in detectar_subregistro(df, cols_texto):
                 st.write(a)
@@ -678,6 +678,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
