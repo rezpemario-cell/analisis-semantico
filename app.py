@@ -1,6 +1,7 @@
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+import io
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -317,9 +318,12 @@ if modo == "📋 Encuesta":
             st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
             with col1:
-                st.download_button("Descargar datos CSV", df_filtrado.to_csv(index=False).encode("utf-8"), file_name="resultados_encuesta.csv")
+                buffer_enc = io.BytesIO()
+                df_filtrado.to_excel(buffer_enc, index=False, engine="openpyxl")
+                buffer_enc.seek(0)
+                st.download_button("⬇ Descargar datos Excel", buffer_enc, file_name="resultados_encuesta.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
-                st.download_button("Descargar informe TXT", informe.encode("utf-8"), file_name="informe_ejecutivo.txt")
+                st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_ejecutivo.txt")
 
 # ════════════════════════════════════════════════════════════════
 # MÓDULO 2 — CARTOGRAFÍA SOCIAL
@@ -654,9 +658,12 @@ Frases más representativas:
             col1, col2 = st.columns(2)
             with col1:
                 cols_descarga = ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
-                st.download_button("Descargar datos CSV", df_filtrado[cols_descarga].to_csv(index=False).encode("utf-8"), file_name="resultados_cartografia.csv")
+                buffer_cart = io.BytesIO()
+                df_filtrado[cols_descarga].to_excel(buffer_cart, index=False, engine="openpyxl")
+                buffer_cart.seek(0)
+                st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
-                st.download_button("Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+                st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
 
 
 
