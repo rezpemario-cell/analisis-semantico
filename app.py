@@ -53,7 +53,7 @@ Genera UN título descriptivo de máximo 6 palabras que capture el tema central.
 Responde SOLO con el título, sin explicaciones."""
         try:
             resp = client.chat.completions.create(
-                model="llama3-8b-8192",
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=20
             )
@@ -88,7 +88,7 @@ ALERTAS:
 Máximo 3 puntos por categoría. Si no hay hallazgos para una categoría escribe "No identificados"."""
     try:
         resp = client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500
         )
@@ -115,7 +115,7 @@ Genera un informe ejecutivo profesional con estas secciones:
 Usa lenguaje profesional, directo y orientado a la toma de decisiones."""
     try:
         resp = client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1500
         )
@@ -563,3 +563,4 @@ Frases más representativas:
             with col2:
                 informe_bytes = informe.encode("utf-8")
                 st.download_button("Descargar informe TXT", informe_bytes, file_name="informe_cartografia.txt")
+
