@@ -463,7 +463,7 @@ elif modo == "🗺️ Cartografía Social":
 
             # ── SUBREGISTRO ───────────────────────────────────────
             st.subheader("🔎 Detección de subregistro")
-            for a in detectar_subregistro(df_result, cols_componentes):
+            for a in detectar_subregistro(df_result):
                 st.write(a)
 
             # ── FILTROS ───────────────────────────────────────────
@@ -612,4 +612,5 @@ Frases más representativas:
                 st.download_button("Descargar datos CSV", df_filtrado[cols_descarga].to_csv(index=False).encode("utf-8"), file_name="resultados_cartografia.csv")
             with col2:
                 st.download_button("Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
