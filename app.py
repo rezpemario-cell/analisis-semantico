@@ -167,6 +167,14 @@ modo = st.sidebar.radio("Selecciona el tipo de análisis:",
 # ════════════════════════════════════════════════════════════════
 if modo == "📋 Encuesta":
     st.header("Módulo de Encuesta")
+    if "resultados_encuesta" not in st.session_state:
+        st.session_state.resultados_encuesta = None
+    if "informe_encuesta" not in st.session_state:
+        st.session_state.informe_encuesta = None
+    if "resultados_encuesta" not in st.session_state:
+        st.session_state.resultados_encuesta = None        
+    if "informe_encuesta" not in st.session_state:
+        st.session_state.informe_encuesta = None
     st.write("Sube tu Excel con columnas Likert, respuestas abiertas y opcionalmente datos sociodemográficos.")
 
     archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
@@ -224,8 +232,10 @@ if modo == "📋 Encuesta":
                     df["x"] = np.random.rand(len(vectores))
                     df["y"] = np.random.rand(len(vectores))
 
+            st.session_state.resultados_encuesta = df
+            st.session_state.informe_encuesta = None
             st.success("Análisis completado.")
-
+            st.session_state.resultados_encuesta = df_filtrado
             st.subheader("🔎 Detección de subregistro")
             for a in detectar_subregistro(df, cols_texto):
                 st.write(a)
@@ -325,9 +335,9 @@ if modo == "📋 Encuesta":
                 buffer_enc = io.BytesIO()
                 df_filtrado.to_excel(buffer_enc, index=False, engine="openpyxl")
                 buffer_enc.seek(0)
-                st.download_button("⬇ Descargar datos Excel", buffer_enc, file_name="resultados_encuesta.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button("⬇ Descargar datos Excel", buffer_enc, file_name="resultados_encuesta.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="descarga_encuesta"),
             with col2:
-                st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_ejecutivo.txt")
+                st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_ejecutivo.txt", key="descarga_informe_encuesta")
 
 # ════════════════════════════════════════════════════════════════
 # MÓDULO 2 — CARTOGRAFÍA SOCIAL
@@ -668,6 +678,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
