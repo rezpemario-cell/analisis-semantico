@@ -660,6 +660,19 @@ Sin explicaciones."""
                             if row['lineas_inversion'] not in ["Sin líneas definidas", "No determinado", "nan"]:
                                 st.caption(f"  Líneas: {row['lineas_inversion']}")
                             frases_vistas.append(frase)
+                        es_repetida = any(
+                            frase.lower() in f.lower() or f.lower() in frase.lower()
+                            for f in frases_vistas
+                        )
+                        if not es_repetida:
+                            frecuencia = subset_comp["frase"].str.lower().str.contains(
+                                frase[:20].lower(), na=False).sum()
+                            st.write(f"• {frase} (peso: {row['peso_semantico']})")
+                            if frecuencia > 1:
+                                st.caption(f"  💬 {frecuencia} participantes expresaron ideas similares")
+                            if row['lineas_inversion'] not in ["Sin líneas definidas", "No determinado", "nan"]:
+                                st.caption(f"  Líneas: {row['lineas_inversion']}")
+                            frases_vistas.append(frase)
             # ── INFORME IA ────────────────────────────────────────
             st.subheader("📄 Informe ejecutivo generado por IA")
             resumen_para_ia = f"""
@@ -701,6 +714,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
