@@ -661,6 +661,10 @@ Sin explicaciones."""
                             if str(row['lineas_inversion']) not in ["Sin líneas definidas", "No determinado", "nan"]:
                                 st.caption(f"  Líneas: {row['lineas_inversion']}")
                             frases_vistas.append(frase)
+                                st.caption(f"  💬 {frecuencia} frases con temática similar en este grupo")
+                            if str(row['lineas_inversion']) not in ["Sin líneas definidas", "No determinado", "nan"]:
+                                st.caption(f"  Líneas: {row['lineas_inversion']}")
+                            frases_vistas.append(frase)
                             if row['lineas_inversion'] not in ["Sin líneas definidas", "No determinado", "nan"]:
                                 st.caption(f"  Líneas: {row['lineas_inversion']}")
                             frases_vistas.append(frase)
@@ -718,6 +722,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
