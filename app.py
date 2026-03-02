@@ -651,11 +651,10 @@ Sin explicaciones."""
                             frase.lower() in f.lower() or f.lower() in frase.lower()
                             for f in frases_vistas
                         )
-                        if not es_repetida:
-                            peso_redondeado = round(float(row["peso_semantico"]), 3)
+                        if not es_repetida:                            
                             grupo_frase = row["grupo"]
                             frecuencia = subset_comp[subset_comp["grupo"] == grupo_frase].shape[0]
-                            st.write(f"• {frase} (peso: {peso_redondeado})")
+                            st.write(f"• {frase} (peso: {round(float(row['peso_semantico']), 3)})")
                             if frecuencia > 1:
                                 st.caption(f"  💬 {frecuencia} frases con temática similar en este grupo")
                             if str(row['lineas_inversion']) not in ["Sin líneas definidas", "No determinado", "nan"]:
@@ -722,6 +721,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
