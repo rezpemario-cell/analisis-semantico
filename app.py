@@ -641,7 +641,7 @@ Sin explicaciones."""
             # ── FRASES REPRESENTATIVAS ────────────────────────────
             st.subheader("💬 Frases más representativas por componente")
             for comp in comp_filtro:
-                with st.expander(f"📌 {comp}"):
+               with st.expander(f"📌 {comp}"):
                     subset_comp = df_filtrado[df_filtrado["componente"] == comp]
                     top = subset_comp.nlargest(5, "peso_semantico")
                     frases_vistas = []
@@ -652,11 +652,15 @@ Sin explicaciones."""
                             for f in frases_vistas
                         )
                         if not es_repetida:
-                            frecuencia = subset_comp["frase"].str.lower().str.contains(
-                                frase[:20].lower(), na=False).sum()
-                            st.write(f"• {frase} (peso: {row['peso_semantico']})")
+                            peso_redondeado = round(float(row["peso_semantico"]), 3)
+                            grupo_frase = row["grupo"]
+                            frecuencia = subset_comp[subset_comp["grupo"] == grupo_frase].shape[0]
+                            st.write(f"• {frase} (peso: {peso_redondeado})")
                             if frecuencia > 1:
-                                st.caption(f"  💬 {frecuencia} participantes expresaron ideas similares")
+                                st.caption(f"  💬 {frecuencia} frases con temática similar en este grupo")
+                            if str(row['lineas_inversion']) not in ["Sin líneas definidas", "No determinado", "nan"]:
+                                st.caption(f"  Líneas: {row['lineas_inversion']}")
+                            frases_vistas.append(frase)
                             if row['lineas_inversion'] not in ["Sin líneas definidas", "No determinado", "nan"]:
                                 st.caption(f"  Líneas: {row['lineas_inversion']}")
                             frases_vistas.append(frase)
@@ -714,6 +718,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
