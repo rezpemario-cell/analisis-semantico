@@ -367,7 +367,7 @@ elif modo == "🗺️ Cartografía Social":
         columnas = list(df.columns)
 
         # ── COLUMNAS FIJAS ────────────────────────────────────────
-        cols_meta = [c for c in columnas if c.lower() in ["año", "semestre", "municipio", "vereda", "participantes", "anno", "ano"]]
+        cols_meta = [c for c in columnas if any(palabra in c.lower() for palabra in ["año", "semestre", "municipio", "vereda", "participantes", "anno", "ano", "semestre 1 o 2", "cantidad de participantes"])]
         col_lineas = "lineas de inversion"
 
         cols_componentes_default = [c for c in columnas if c not in cols_meta + [col_lineas]]
@@ -689,6 +689,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
