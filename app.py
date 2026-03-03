@@ -469,7 +469,7 @@ elif modo == "🗺️ Cartografía Social":
 
                 df_result = pd.DataFrame(resultados)
 
-            letras = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            letras = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
             for comp in cols_componentes:
                 mask = df_result["componente"] == comp
                 grupos_unicos = sorted(df_result[mask]["grupo_num"].unique())
@@ -730,6 +730,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
