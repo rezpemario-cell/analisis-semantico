@@ -634,16 +634,18 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                         frase_corta = frase[:50] + "..." if len(frase) > 50 else frase
                         frases_rep[grupo] = frase_corta
                 conteo_g["Tema"] = conteo_g["Grupo"].map(frases_rep)
-                conteo_g["Etiqueta"] = conteo_g["Grupo"] + ": " + conteo_g["Tema"]
                 with cols_graf[i % 2]:
                     fig_g = px.bar(
-                        conteo_g, x="Etiqueta", y="Frecuencia",
+                        conteo_g, x="Grupo", y="Frecuencia",
                         color="Grupo", title=f"{comp.upper()}",
-                        text="Frecuencia"
+                        text="Frecuencia",
+                        hover_data={"Tema": True}
                     )
                     fig_g.update_traces(textposition="outside")
-                    fig_g.update_layout(showlegend=False, height=350, xaxis_tickangle=-30)
+                    fig_g.update_layout(showlegend=False, height=350)
                     st.plotly_chart(fig_g, use_container_width=True)
+                    for _, row in conteo_g.iterrows():
+                        st.caption(f"**{row['Grupo']}:** {row['Tema']}")
             # ── COHESIÓN ──────────────────────────────────────────
             st.subheader("Cohesión semántica por componente")
             pesos_c = df_filtrado.groupby("componente")["peso_semantico"].mean().round(3).reset_index()
@@ -739,6 +741,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
