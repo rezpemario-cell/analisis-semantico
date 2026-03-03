@@ -491,18 +491,30 @@ elif modo == "🗺️ Cartografía Social":
                     frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(frases_lote))
                     lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
 
-                    prompt = f"""Eres un experto en planificación territorial.
-Para cada frase numerada, indica a qué líneas de inversión corresponde.
-Líneas disponibles (usa EXACTAMENTE estos nombres, sin modificar):
+                    prompt = f"""Eres un experto en desarrollo territorial con profundo conocimiento en Investigación-Acción Participativa (IAP), educación popular y etnografía crítica, en la línea de Orlando Fals Borda y Paulo Freire.
+
+Estás analizando frases de una cartografía social participativa en el contexto de {contexto}. Esta cartografía no solo describe el territorio — lo interpreta desde la memoria, el conflicto, el poder y la esperanza colectiva.
+
+Los componentes del ejercicio buscan identificar:
+- SOCIAL: Actores sociales, relaciones, problemáticas, prácticas culturales, equipamientos (escuelas, iglesias, parques, vías, puestos de salud), capital social.
+- AMBIENTAL: Recursos naturales, problemáticas ambientales, usos del suelo, zonas de riesgo, prácticas de cuidado o deterioro, percepción comunitaria del entorno.
+- ECONOMICO: Actividades productivas, economías de subsistencia, fuentes de ingreso, circuitos económicos locales, dependencias externas, emprendimientos.
+- ALIANZAS: Presencia institucional (ONG, entidades públicas, universidades, empresas), tipo de relación con la comunidad, proyectos vigentes, vacíos institucionales.
+- GOBERNANZA: Estructuras de autoridad, liderazgos reales vs. formales, participación ciudadana, conflictos de poder, incidencia política.
+- PROYECCION: Sueños, esperanza organizada, visión de desarrollo, propuestas de transformación.
+
+Líneas de inversión disponibles (usa EXACTAMENTE estos nombres, sin modificar):
 {lineas_str}
+
+Para cada frase numerada, interpreta su significado en el contexto territorial y comunitario, luego indica a cuáles líneas de inversión corresponde. Una frase puede corresponder a varias líneas.
 
 Frases:
 {frases_str}
 
-Responde SOLO en este formato exacto, una línea por frase:
+Responde SOLO en este formato exacto, una línea por frase numerada:
 1. Línea A, Línea B
 2. Línea C
-Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen arriba."""
+Sin explicaciones adicionales. Usa EXACTAMENTE los nombres de las líneas tal como aparecen arriba."""
                     try:
                         resp = client.chat.completions.create(
                             model="llama-3.1-8b-instant",
@@ -759,21 +771,5 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
