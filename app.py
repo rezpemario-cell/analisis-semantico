@@ -578,24 +578,28 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
 
             # ── LÍNEAS DE INVERSIÓN ───────────────────────────────
             st.subheader("💰 Distribución por línea de inversión")
-            lineas_validas = set()
+            lineas_canonicas = []
                     for lineas_str in df_filtrado["lineas_disponibles"]:
                         for l in lineas_str:
-                            lineas_validas.add(l.strip().rstrip(".").strip().lower())
+                            l_clean = l.strip().rstrip(".").strip()
+                            if l_clean and l_clean not in lineas_canonicas:
+                                lineas_canonicas.append(l_clean)
+
+                    def normalizar_linea(texto):
+                        texto = texto.strip().rstrip(".").strip()
+                        for canon in lineas_canonicas:
+                            palabras_canon = set(canon.lower().split())
+                            palabras_texto = set(texto.lower().split())
+                            if len(palabras_canon & palabras_texto) >= 2:
+                                return canon
+                        return None
 
                     todas_lineas = []
                     for lineas_str in df_filtrado["lineas_inversion"]:
                         for l in str(lineas_str).split(","):
-                            l_clean = l.strip().rstrip(".").strip()
-                            l_lower = l_clean.lower()
-                            coincide = any(
-                                valid in l_lower or l_lower in valid
-                                for valid in lineas_validas
-                            )
-                            if l_clean and coincide and l_clean not in ["Sin líneas definidas", "No determinado", "nan"]:
-                                mejor = min(lineas_validas,
-                                           key=lambda v: sum(c not in v for c in l_lower))
-                                todas_lineas.append(mejor.title())
+                            normalizada = normalizar_linea(l)
+                            if normalizada:
+                                todas_lineas.append(normalizada)
                                 todas_lineas.append(l)
             if todas_lineas:
                 df_lineas = pd.DataFrame({"linea": todas_lineas})
@@ -721,5 +725,6 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
