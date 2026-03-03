@@ -626,14 +626,23 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                 subset_comp = df_filtrado[df_filtrado["componente"] == comp]
                 conteo_g = subset_comp["grupo"].value_counts().reset_index()
                 conteo_g.columns = ["Grupo", "Frecuencia"]
+                frases_rep = {}
+                for grupo in conteo_g["Grupo"]:
+                    top_frase = subset_comp[subset_comp["grupo"] == grupo].nlargest(1, "peso_semantico")
+                    if len(top_frase) > 0:
+                        frase = top_frase.iloc[0]["frase"]
+                        frase_corta = frase[:50] + "..." if len(frase) > 50 else frase
+                        frases_rep[grupo] = frase_corta
+                conteo_g["Tema"] = conteo_g["Grupo"].map(frases_rep)
+                conteo_g["Etiqueta"] = conteo_g["Grupo"] + ": " + conteo_g["Tema"]
                 with cols_graf[i % 2]:
                     fig_g = px.bar(
-                        conteo_g, x="Grupo", y="Frecuencia",
+                        conteo_g, x="Etiqueta", y="Frecuencia",
                         color="Grupo", title=f"{comp.upper()}",
                         text="Frecuencia"
                     )
                     fig_g.update_traces(textposition="outside")
-                    fig_g.update_layout(showlegend=False, height=300)
+                    fig_g.update_layout(showlegend=False, height=350, xaxis_tickangle=-30)
                     st.plotly_chart(fig_g, use_container_width=True)
             # ── COHESIÓN ──────────────────────────────────────────
             st.subheader("Cohesión semántica por componente")
@@ -730,6 +739,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
