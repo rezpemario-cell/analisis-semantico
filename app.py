@@ -479,7 +479,6 @@ elif modo == "🗺️ Cartografía Social":
                     df_result.loc[mask, "grupo"] = df_result.loc[mask, "grupo_num"].map(etiquetas)
 
             with st.spinner("Asociando frases a líneas de inversión con IA..."):
-                lineas_inversion_col = []
                 for comp in cols_componentes:
                     mask = df_result["componente"] == comp
                     subset = df_result[mask].reset_index(drop=True)
@@ -497,7 +496,7 @@ elif modo == "🗺️ Cartografía Social":
 
                     prompt = f"""Eres un experto en planificación territorial.
 Para cada frase numerada, indica a qué líneas de inversión corresponde.
-Líneas disponibles:
+Líneas disponibles (usa EXACTAMENTE estos nombres, sin modificar):
 {lineas_str}
 
 Frases:
@@ -506,8 +505,7 @@ Frases:
 Responde SOLO en este formato exacto, una línea por frase:
 1. Línea A, Línea B
 2. Línea C
-3. Línea A, Línea C
-Sin explicaciones."""
+Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen arriba."""
                     try:
                         resp = client.chat.completions.create(
                             model="llama-3.1-8b-instant",
@@ -517,21 +515,25 @@ Sin explicaciones."""
                         lineas_resp = resp.choices[0].message.content.strip().split("\n")
                         for i, frase in enumerate(frases_lote):
                             if i < len(lineas_resp):
-                                linea_limpia = lineas_resp[i].split(". ", 1)[-1].strip()
+                                linea_raw = lineas_resp[i].split(". ", 1)[-1].strip().rstrip(".")
+                                # Normalizar contra las líneas disponibles
+                                partes = [p.strip().rstrip(".") for p in linea_raw.split(",")]
+                                partes_normalizadas = []
+                                for parte in partes:
+                                    mejor = min(lineas_disponibles,
+                                               key=lambda l: sum(c not in l.lower() for c in parte.lower()))
+                                    if any(palabra in mejor.lower() for palabra in parte.lower().split()[:2]):
+                                        partes_normalizadas.append(mejor)
+                                    else:
+                                        partes_normalizadas.append(parte)
+                                linea_final = ", ".join(partes_normalizadas)
                             else:
-                                linea_limpia = "No determinado"
+                                linea_final = "No determinado"
                             idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
                             if len(idx) > 0:
-                                df_result.loc[idx[0], "lineas_inversion"] = linea_limpia
+                                df_result.loc[idx[0], "lineas_inversion"] = linea_final
                     except Exception as e:
                         df_result.loc[mask, "lineas_inversion"] = f"Error: {e}"
-                for _, row in df_result.iterrows():
-                    if row["lineas_disponibles"]:
-                        asoc = asociar_lineas_inversion(row["frase"], row["lineas_disponibles"], contexto)
-                    else:
-                        asoc = "Sin líneas definidas"
-                    lineas_inversion_col.append(asoc)
-                df_result["lineas_inversion"] = lineas_inversion_col
 
             st.success("Análisis completado.")
 
@@ -706,27 +708,3 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
