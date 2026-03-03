@@ -680,12 +680,15 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                     subset_comp = df_filtrado[df_filtrado["componente"] == comp]
                     top = subset_comp.nlargest(5, "peso_semantico")
                     frases_vistas = []
+                    vectores_vistos = []
                     for _, row in top.iterrows():
                         frase = row["frase"].strip()
-                        es_repetida = any(
-                            frase.lower() in f.lower() or f.lower() in frase.lower()
-                            for f in frases_vistas
-                        )
+                        if vectores_vistos:
+                            vec_frase = modelo.encode([frase])
+                            sims = cosine_similarity(vec_frase, vectores_vistos)[0]
+                            es_repetida = any(s > 0.85 for s in sims)
+                        else:
+                            es_repetida = False
                         if not es_repetida:
                             grupo_frase = row["grupo"]
                             subset_grupo = subset_comp[subset_comp["grupo"] == grupo_frase]
@@ -748,6 +751,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
