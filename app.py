@@ -584,12 +584,19 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
 
             def normalizar_linea(texto):
                 texto = texto.strip().rstrip(".").strip().lower()
+                if not texto or len(texto) < 3:
+                    return None
+                mejor_coincidencia = None
+                mejor_puntaje = 0
                 for canon in lineas_canonicas:
                     palabras_canon = set(canon.lower().split())
                     palabras_texto = set(texto.split())
-                    if len(palabras_canon & palabras_texto) >= 2:
-                        return canon
-                return None
+                    coincidencias = len(palabras_canon & palabras_texto)
+                    puntaje = coincidencias / max(len(palabras_canon), 1)
+                    if puntaje > mejor_puntaje and puntaje >= 0.4:
+                        mejor_puntaje = puntaje
+                        mejor_coincidencia = canon
+                return mejor_coincidencia
 
             todas_lineas = []
             for lineas_str in df_filtrado["lineas_inversion"]:
@@ -752,6 +759,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
