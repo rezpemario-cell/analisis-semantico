@@ -469,15 +469,12 @@ elif modo == "🗺️ Cartografía Social":
 
                 df_result = pd.DataFrame(resultados)
 
-            with st.spinner("Etiquetando grupos con IA..."):
-                for comp in cols_componentes:
-                    mask = df_result["componente"] == comp
-                    fp = {}
-                    for _, row in df_result[mask].iterrows():
-                        fp.setdefault(row["grupo_num"], []).append(row["frase"])
-                    etiquetas = etiquetar_grupos_ia(fp, contexto)
-                    df_result.loc[mask, "grupo"] = df_result.loc[mask, "grupo_num"].map(etiquetas)
-
+            letras = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            for comp in cols_componentes:
+                mask = df_result["componente"] == comp
+                grupos_unicos = sorted(df_result[mask]["grupo_num"].unique())
+                mapa = {g: f"Grupo {letras[i]}" for i, g in enumerate(grupos_unicos)}
+                df_result.loc[mask, "grupo"] = df_result.loc[mask, "grupo_num"].map(mapa)
             with st.spinner("Asociando frases a líneas de inversión con IA..."):
                 for comp in cols_componentes:
                     mask = df_result["componente"] == comp
@@ -733,6 +730,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
