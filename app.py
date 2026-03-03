@@ -622,13 +622,22 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                                       barmode="group", title="Componentes por línea de inversión")
                     st.plotly_chart(fig_cruce, use_container_width=True)
 
-            # ── GRUPOS POR COMPONENTE ─────────────────────────────
+           # ── GRUPOS POR COMPONENTE ─────────────────────────────
             st.subheader("Grupos semánticos por componente")
-            conteo_g = df_filtrado.groupby(["componente", "grupo"]).size().reset_index(name="frecuencia")
-            fig_g = px.bar(conteo_g, x="componente", y="frecuencia", color="grupo",
-                          barmode="group", title="Grupos por componente")
-            st.plotly_chart(fig_g, use_container_width=True)
-
+            cols_graf = st.columns(2)
+            for i, comp in enumerate(comp_filtro):
+                subset_comp = df_filtrado[df_filtrado["componente"] == comp]
+                conteo_g = subset_comp["grupo"].value_counts().reset_index()
+                conteo_g.columns = ["Grupo", "Frecuencia"]
+                with cols_graf[i % 2]:
+                    fig_g = px.bar(
+                        conteo_g, x="Grupo", y="Frecuencia",
+                        color="Grupo", title=f"{comp.upper()}",
+                        text="Frecuencia"
+                    )
+                    fig_g.update_traces(textposition="outside")
+                    fig_g.update_layout(showlegend=False, height=300)
+                    st.plotly_chart(fig_g, use_container_width=True)
             # ── COHESIÓN ──────────────────────────────────────────
             st.subheader("Cohesión semántica por componente")
             pesos_c = df_filtrado.groupby("componente")["peso_semantico"].mean().round(3).reset_index()
@@ -724,6 +733,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
