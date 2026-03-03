@@ -690,7 +690,14 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                             grupo_frase = row["grupo"]
                             subset_grupo = subset_comp[subset_comp["grupo"] == grupo_frase]
                             frecuencia = subset_grupo.shape[0]
-                            st.write(f"• {frase} (peso: {round(float(row['peso_semantico']), 3)})")
+                            peso = round(float(row['peso_semantico']), 3)
+                            if peso >= 0.85:
+                                relevancia = "Alta relevancia 🔴"
+                            elif peso >= 0.65:
+                                relevancia = "Media relevancia 🟡"
+                            else:
+                                relevancia = "Baja relevancia 🟢"
+                            st.write(f"• {frase} (peso: {peso} — {relevancia})")
                             if frecuencia > 1:
                                 st.caption(f"  💬 {frecuencia} frases con temática similar en este grupo")
                                 otras = subset_grupo[subset_grupo["frase"] != frase]["frase"].head(2).tolist()
@@ -741,6 +748,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
