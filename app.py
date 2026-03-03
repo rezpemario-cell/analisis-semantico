@@ -612,9 +612,9 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                 cruce_data = []
                 for _, row in df_filtrado.iterrows():
                     for l in str(row["lineas_inversion"]).split(","):
-                        l = l.strip()
-                        if l and l != "nan" and l != "Sin líneas definidas" and l != "No determinado":
-                            cruce_data.append({"Componente": row["componente"], "Línea": l})
+                        normalizada = normalizar_linea(l)
+                        if normalizada:
+                            cruce_data.append({"Componente": row["componente"], "Línea": normalizada})
                 if cruce_data:
                     df_cruce = pd.DataFrame(cruce_data)
                     pivot = df_cruce.groupby(["Componente", "Línea"]).size().reset_index(name="n")
@@ -724,6 +724,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
