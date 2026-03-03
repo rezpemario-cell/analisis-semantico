@@ -3,6 +3,15 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 import io
 import streamlit as st
+# ── INICIALIZAR SESSION STATE ─────────────────────────────────────
+if "resultados_cart" not in st.session_state:
+    st.session_state.resultados_cart = None
+if "informe_cart" not in st.session_state:
+    st.session_state.informe_cart = None
+if "resultados_enc" not in st.session_state:
+    st.session_state.resultados_enc = None
+if "informe_enc" not in st.session_state:
+    st.session_state.informe_enc = None
 import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -235,6 +244,7 @@ if modo == "📋 Encuesta":
             st.session_state.resultados_encuesta = df
             st.session_state.informe_encuesta = None
             st.success("Análisis completado.")
+            st.session_state.resultados_enc = df
             st.session_state.resultados_encuesta = df
             st.subheader("🔎 Detección de subregistro")
             for a in detectar_subregistro(df, cols_texto):
@@ -327,6 +337,7 @@ if modo == "📋 Encuesta":
                         resumen_para_ia += f"  - {row['texto_unido']}\n"
             with st.spinner("Generando informe con IA..."):
                 informe = generar_informe_ia(resumen_para_ia, contexto)
+                st.session_state.informe_enc = informa
             st.markdown(informe)
 
             st.subheader("⬇ Descargas")
@@ -545,6 +556,7 @@ Sin explicaciones adicionales. Usa EXACTAMENTE los nombres de las líneas tal co
                         df_result.loc[mask, "lineas_inversion"] = f"Error: {e}"
 
             st.success("Análisis completado.")
+            st.session_state.resultados_cart = df_result
 
             # ── SUBREGISTRO ───────────────────────────────────────
             st.subheader("🔎 Detección de subregistro")
@@ -752,6 +764,7 @@ Frases más representativas:
 
             with st.spinner("Generando informe ejecutivo con IA..."):
                 informe = generar_informe_ia(resumen_para_ia, contexto)
+                st.session_state.informe_cart = informe
             st.markdown(informe)
 
             # ── TABLA DETALLADA ───────────────────────────────────
@@ -761,6 +774,7 @@ Frases más representativas:
             st.dataframe(df_filtrado[df_filtrado["componente"] == comp_vista][cols_vista], use_container_width=True)
 
             # ── DESCARGA ──────────────────────────────────────────
+            st.session_state.resultados_cart = df_filtrado
             st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
             with col1:
@@ -768,8 +782,21 @@ Frases más representativas:
                 buffer_cart = io.BytesIO()
                 df_filtrado[cols_descarga].to_excel(buffer_cart, index=False, engine="openpyxl")
                 buffer_cart.seek(0)
-                st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(
+                    "⬇ Descargar datos Excel",
+                    data=buffer_cart,
+                    file_name="resultados_cartografia.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="descarga_cart"
+                )
             with col2:
-                st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+                if st.session_state.informe_cart:
+                    st.download_button(
+                        "⬇ Descargar informe TXT",
+                        data=st.session_state.informe_cart.encode("utf-8"),
+                        file_name="informe_cartografia.txt",
+                        key="descarga_informe_cart"
+                    )
+
 
 
