@@ -631,7 +631,7 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                     top_frase = subset_comp[subset_comp["grupo"] == grupo].nlargest(1, "peso_semantico")
                     if len(top_frase) > 0:
                         frase = top_frase.iloc[0]["frase"]
-                        frase_corta = frase[:50] + "..." if len(frase) > 50 else frase
+                        frase_corta = frase[:70] + "..." if len(frase) > 70 else frase
                         frases_rep[grupo] = frase_corta
                 conteo_g["Tema"] = conteo_g["Grupo"].map(frases_rep)
                 with cols_graf[i % 2]:
@@ -741,6 +741,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
