@@ -693,7 +693,7 @@ Sin explicaciones. Usa EXACTAMENTE los nombres de las líneas tal como aparecen 
                         if vectores_vistos:
                             vec_frase = modelo.encode([frase])
                             sims = cosine_similarity(vec_frase, vectores_vistos)[0]
-                            es_repetida = any(s > 0.85 for s in sims)
+                            es_repetida = any(s > 0.75 for s in sims)
                         else:
                             es_repetida = False
                         if not es_repetida:
@@ -759,6 +759,7 @@ Frases más representativas:
                 st.download_button("⬇ Descargar datos Excel", buffer_cart, file_name="resultados_cartografia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             with col2:
                 st.download_button("⬇ Descargar informe TXT", informe.encode("utf-8"), file_name="informe_cartografia.txt")
+
 
 
 
