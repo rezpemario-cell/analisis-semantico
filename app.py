@@ -781,6 +781,7 @@ Frases más representativas:
                 # ── CONSTRUIR EXCEL MULTI-HOJA ────────────────────
                 buffer_cart = io.BytesIO()
                 with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:
+                try:
 
                     # Hoja 1 — Datos completos
                     cols_descarga = ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
@@ -864,6 +865,8 @@ Frases más representativas:
                             if linea.strip():
                                 cat_export.append({"Componente": comp, "Categorización": linea.strip()})
                     pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion hallazgos", index=False)
+                    except Exception as e:
+                        st.error(f"Error construyendo Excel: {e}")
 
                 buffer_cart.seek(0)
                 st.download_button(
@@ -881,6 +884,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
