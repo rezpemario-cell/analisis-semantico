@@ -778,14 +778,98 @@ Frases más representativas:
             st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
             with col1:
-                cols_descarga = ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
+                # ── CONSTRUIR EXCEL MULTI-HOJA ────────────────────
                 buffer_cart = io.BytesIO()
-                df_filtrado[cols_descarga].to_excel(buffer_cart, index=False, engine="openpyxl")
+                with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:
+
+                    # Hoja 1 — Datos completos
+                    cols_descarga = ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
+                    df_filtrado[cols_descarga].to_excel(writer, sheet_name="Datos completos", index=False)
+
+                    # Hoja 2 — Distribución por componente
+                    conteo_comp.to_excel(writer, sheet_name="Distribucion componentes", index=False)
+
+                    # Hoja 3 — Líneas de inversión
+                    if todas_lineas:
+                        df_lineas = pd.DataFrame({"linea": todas_lineas})
+                        conteo_lineas = df_lineas["linea"].value_counts().reset_index()
+                        conteo_lineas.columns = ["Línea de inversión", "Frecuencia"]
+                        conteo_lineas.to_excel(writer, sheet_name="Lineas de inversion", index=False)
+
+                    # Hoja 4 — Cruce componente x línea
+                    if cruce_data:
+                        df_cruce_export = pd.DataFrame(cruce_data)
+                        pivot_export = df_cruce_export.groupby(["Componente", "Línea"]).size().reset_index(name="Cantidad")
+                        pivot_export.to_excel(writer, sheet_name="Cruce componente x linea", index=False)
+
+                    # Hoja 5 — Grupos por componente
+                    grupos_export = []
+                    for comp in comp_filtro:
+                        subset_comp = df_filtrado[df_filtrado["componente"] == comp]
+                        for grupo in subset_comp["grupo"].unique():
+                            subset_grupo = subset_comp[subset_comp["grupo"] == grupo]
+                            frase_rep = subset_grupo.nlargest(1, "peso_semantico").iloc[0]["frase"]
+                            grupos_export.append({
+                                "Componente": comp,
+                                "Grupo": grupo,
+                                "Frecuencia": len(subset_grupo),
+                                "Frase representativa": frase_rep
+                            })
+                    pd.DataFrame(grupos_export).to_excel(writer, sheet_name="Grupos por componente", index=False)
+
+                    # Hoja 6 — Cohesión semántica
+                    pesos_c.to_excel(writer, sheet_name="Cohesion semantica", index=False)
+
+                    # Hoja 7 — Resumen ejecutivo
+                    resumen_exec.to_excel(writer, sheet_name="Resumen ejecutivo", index=False)
+
+                    # Hoja 8 — Frases representativas
+                    frases_rep_export = []
+                    for comp in comp_filtro:
+                        subset_comp = df_filtrado[df_filtrado["componente"] == comp]
+                        frases_vistas_exp = []
+                        vectores_vistos_exp = []
+                        top = subset_comp.nlargest(5, "peso_semantico")
+                        for _, row in top.iterrows():
+                            frase = row["frase"].strip()
+                            if vectores_vistos_exp:
+                                vec = modelo.encode([frase])
+                                sims = cosine_similarity(vec, vectores_vistos_exp)[0]
+                                es_rep = any(s > 0.75 for s in sims)
+                            else:
+                                es_rep = False
+                            if not es_rep:
+                                peso = round(float(row["peso_semantico"]), 3)
+                                relevancia = "Alta 🔴" if peso >= 0.85 else ("Media 🟡" if peso >= 0.65 else "Baja 🟢")
+                                grupo_frase = row["grupo"]
+                                otras = subset_comp[subset_comp["grupo"] == grupo_frase]["frase"].tolist()[:3]
+                                frases_rep_export.append({
+                                    "Componente": comp,
+                                    "Frase": frase,
+                                    "Peso": peso,
+                                    "Relevancia": relevancia,
+                                    "Variaciones similares": " | ".join(otras),
+                                    "Líneas de inversión": row["lineas_inversion"]
+                                })
+                                frases_vistas_exp.append(frase)
+                                vectores_vistos_exp.append(modelo.encode([frase])[0])
+                    pd.DataFrame(frases_rep_export).to_excel(writer, sheet_name="Frases representativas", index=False)
+
+                    # Hoja 9 — Categorización (texto plano por componente)
+                    cat_export = []
+                    for comp in comp_filtro:
+                        frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
+                        cat_texto = categorizar_hallazgos(frases_comp, contexto)
+                        for linea in cat_texto.split("\n"):
+                            if linea.strip():
+                                cat_export.append({"Componente": comp, "Categorización": linea.strip()})
+                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion hallazgos", index=False)
+
                 buffer_cart.seek(0)
                 st.download_button(
-                    "⬇ Descargar datos Excel",
+                    "⬇ Descargar análisis completo Excel",
                     data=buffer_cart,
-                    file_name="resultados_cartografia.xlsx",
+                    file_name="analisis_cartografia.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="descarga_cart"
                 )
@@ -797,6 +881,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
