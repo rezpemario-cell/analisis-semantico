@@ -862,12 +862,7 @@ Frases más representativas:
                         for linea in cat_texto.split("\n"):
                             if linea.strip():
                                 cat_export.append({"Componente": comp, "Categorización": linea.strip()})
-                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion hallazgos", index=False)
-                    except Exception as e:
-                        st.error(f"Error construyendo Excel: {e}")
-
-                except Exception as e:
-                        st.error(f"Error construyendo Excel: {e}")                
+                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion hallazgos", index=False)                    
                 buffer_cart.seek(0)
                 st.download_button(
                     "⬇ Descargar análisis completo Excel",
@@ -884,6 +879,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
