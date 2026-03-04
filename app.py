@@ -782,7 +782,6 @@ Frases más representativas:
                 buffer_cart = io.BytesIO()
                 with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:
                 try:
-
                     # Hoja 1 — Datos completos
                     cols_descarga = ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
                     df_filtrado[cols_descarga].to_excel(writer, sheet_name="Datos completos", index=False)
@@ -868,6 +867,8 @@ Frases más representativas:
                     except Exception as e:
                         st.error(f"Error construyendo Excel: {e}")
 
+                except Exception as e:
+                        st.error(f"Error construyendo Excel: {e}")                
                 buffer_cart.seek(0)
                 st.download_button(
                     "⬇ Descargar análisis completo Excel",
@@ -884,6 +885,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
