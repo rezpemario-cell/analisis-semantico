@@ -499,8 +499,13 @@ elif modo == "🗺️ Cartografía Social":
                         continue
 
                     frases_lote = subset["frase"].tolist()
-                    frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(frases_lote))
                     lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
+                    lineas_validas_set = set(l.lower() for l in lineas_disponibles)
+                    
+                    # Procesar en sublotes de 20 frases
+                    for inicio in range(0, len(frases_lote), 20):
+                        sublote = frases_lote[inicio:inicio+20]
+                        frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(sublote))
 
                     prompt = f"""Eres un experto en desarrollo territorial con profundo conocimiento en Investigación-Acción Participativa (IAP), educación popular y etnografía crítica, en la línea de Orlando Fals Borda y Paulo Freire.
 
@@ -534,7 +539,7 @@ Sin explicaciones adicionales."""
                             max_tokens=1500
                         )
                         lineas_resp = resp.choices[0].message.content.strip().split("\n")
-                        for i, frase in enumerate(frases_lote):
+                        for i, frase in enumerate(sublote):
                             if i < len(lineas_resp):
                                 linea_raw = lineas_resp[i].split(". ", 1)[-1].strip().rstrip(".")
                                 # Normalizar contra las líneas disponibles
@@ -543,9 +548,11 @@ Sin explicaciones adicionales."""
                                 for parte in partes:
                                     mejor = min(lineas_disponibles,
                                                key=lambda l: sum(c not in l.lower() for c in parte.lower()))
-                                    if any(palabra in mejor.lower() for palabra in parte.lower().split()[:2]):
-                                        partes_normalizadas.append(mejor)
-                                    # Si no coincide con ninguna línea, descartar
+                                   palabras_parte = set(parte.lower().split())
+                                    palabras_mejor = set(mejor.lower().split())
+                                    if len(palabras_parte & palabras_mejor) >= 1 and parte.lower() not in lineas_validas_set == False:
+                                        if not any(comp_nombre in parte.lower() for comp_nombre in ["economico", "social", "ambiental", "gobernanza", "alianzas", "proyeccion", "governance"]):
+                                            partes_normalizadas.append(mejor)
                                 linea_final = ", ".join(partes_normalizadas)
                             else:
                                 linea_final = "No determinado"
@@ -553,7 +560,10 @@ Sin explicaciones adicionales."""
                             if len(idx) > 0:
                                 df_result.loc[idx[0], "lineas_inversion"] = linea_final
                     except Exception as e:
-                        df_result.loc[mask, "lineas_inversion"] = f"Error: {e}"
+                        for frase in sublote:
+                            idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
+                            if len(idx) > 0:
+                                df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
 
             st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
@@ -911,6 +921,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
