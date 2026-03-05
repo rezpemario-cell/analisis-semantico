@@ -402,7 +402,6 @@ elif modo == "🗺️ Cartografía Social":
             if usar_cache:
                 st.info("✅ Mismos datos detectados — usando resultados anteriores.")
                 df_result = st.session_state.cache_result_cart
-            else:
 
             # ── PARTICIPANTES ─────────────────────────────────────
             total_participantes = 0
@@ -427,7 +426,8 @@ elif modo == "🗺️ Cartografía Social":
                                    color="Municipio", title="Participantes por vereda")
                 st.plotly_chart(fig_vereda, use_container_width=True)
 
-            with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
+            if not usar_cache:
+             with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
 
                 # ── FRAGMENTAR FRASES ─────────────────────────────
                 registros = []
@@ -496,7 +496,8 @@ elif modo == "🗺️ Cartografía Social":
                 grupos_unicos = sorted(df_result[mask]["grupo_num"].unique())
                 mapa = {g: f"Grupo {letras[i]}" for i, g in enumerate(grupos_unicos)}
                 df_result.loc[mask, "grupo"] = df_result.loc[mask, "grupo_num"].map(mapa)
-            with st.spinner("Asociando frases a líneas de inversión con IA..."):
+            if not usar_cache:
+             with st.spinner("Asociando frases a líneas de inversión con IA..."):
                 for comp in cols_componentes:
                     mask = df_result["componente"] == comp
                     subset = df_result[mask].reset_index(drop=True)
@@ -926,6 +927,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
