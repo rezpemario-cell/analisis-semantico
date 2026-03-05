@@ -790,10 +790,11 @@ Frases más representativas:
                 with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:
 
                     # Hoja 1 — Datos completos
-                    cols_descarga = ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
+                    cols_meta_export = [c for c in ["municipio", "vereda", "año", "semestre"] if c in df_filtrado.columns]
+                    cols_descarga = cols_meta_export + ["componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
                     cols_disponibles = [c for c in cols_descarga if c in df_filtrado.columns]
                     df_filtrado[cols_disponibles].to_excel(writer, sheet_name="Datos completos", index=False)
-
+                    
                     # Hoja 2 — Distribución por componente
                     conteo_comp.to_excel(writer, sheet_name="Distribucion componentes", index=False)
 
@@ -801,7 +802,8 @@ Frases más representativas:
                     lineas_export = []
                     for lineas_str in df_filtrado["lineas_inversion"]:
                         for l in str(lineas_str).split(","):
-                            normalizada = normalizar_linea(l)
+                            l_clean = l.strip().rstrip(".").strip()
+                            normalizada = normalizar_linea(l_clean)
                             if normalizada:
                                 lineas_export.append(normalizada)
                     if lineas_export:
@@ -814,7 +816,8 @@ Frases más representativas:
                     cruce_export = []
                     for _, row in df_filtrado.iterrows():
                         for l in str(row["lineas_inversion"]).split(","):
-                            normalizada = normalizar_linea(l)
+                            l_clean = l.strip().rstrip(".").strip()
+                            normalizada = normalizar_linea(l_clean)
                             if normalizada:
                                 cruce_export.append({"Componente": row["componente"], "Línea": normalizada})
                     if cruce_export:
@@ -843,7 +846,7 @@ Frases más representativas:
                     # Hoja 7 — Resumen ejecutivo
                     resumen_exec.to_excel(writer, sheet_name="Resumen ejecutivo", index=False)
 
-                    # Hoja 8 — Frases representativas
+                   # Hoja 8 — Frases representativas
                     frases_rep_export = []
                     for comp in comp_filtro:
                         subset_comp = df_filtrado[df_filtrado["componente"] == comp]
@@ -862,22 +865,26 @@ Frases más representativas:
                                 peso = round(float(row["peso_semantico"]), 3)
                                 relevancia = "Alta 🔴" if peso >= 0.85 else ("Media 🟡" if peso >= 0.65 else "Baja 🟢")
                                 grupo_frase = row["grupo"]
-                                otras = subset_comp[subset_comp["grupo"] == grupo_frase]["frase"].tolist()[:3]
+                                subset_grupo = subset_comp[subset_comp["grupo"] == grupo_frase]
+                                frecuencia = subset_grupo.shape[0]
+                                otras = subset_grupo[subset_grupo["frase"] != frase]["frase"].head(2).tolist()
                                 lineas_frase = str(row["lineas_inversion"])
                                 frases_rep_export.append({
                                     "Componente": comp,
                                     "Frase": frase,
                                     "Peso": peso,
                                     "Relevancia": relevancia,
-                                    "Variaciones similares": " | ".join(otras),
+                                    "Frases similares en grupo": frecuencia,
+                                    "Variaciones": " | ".join(otras),
                                     "Líneas de inversión": lineas_frase
                                 })
                                 frases_vistas_exp.append(frase)
                                 vectores_vistos_exp.append(modelo.encode([frase])[0])
                     pd.DataFrame(frases_rep_export).to_excel(writer, sheet_name="Frases representativas", index=False)
 
-                    # Hoja 9 — Categorización (misma que la app)
+                    # Hoja 9 — Categorización
                     cat_export = []
+                    cat_export.append({"Componente": "NOTA", "Categorización": "⚠️ Generada en descarga — puede diferir de la vista en pantalla"})
                     for comp, cat_texto in cat_por_componente.items():
                         for linea in cat_texto.split("\n"):
                             if linea.strip():
@@ -900,4 +907,5 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
