@@ -429,15 +429,14 @@ elif modo == "🗺️ Cartografía Social":
                         if celda and celda != "nan":
                             frases = [f.strip() for f in celda.split(".") if len(f.strip()) > 5]
                             for frase in frases:
-                                registros.append({
-                                    "municipio": fila.get("municipio", ""),
-                                    "vereda": fila.get("vereda", ""),
-                                    "año": fila.get("año", ""),
-                                    "semestre": fila.get("semestre", ""),
+                                registro = {
                                     "componente": comp,
                                     "frase": frase,
                                     "lineas_disponibles": lineas_celda
-                                })
+                                }
+                                for col_m in cols_meta:
+                                    registro[col_m] = fila.get(col_m, "")
+                                registros.append(registro)
 
                 df_frases = pd.DataFrame(registros)
                 st.write(f"Total de frases extraídas: {len(df_frases)}")
@@ -466,17 +465,16 @@ elif modo == "🗺️ Cartografía Social":
                         pesos = [1.0] * len(subset)
 
                     for i, (_, row) in enumerate(subset.iterrows()):
-                        resultados.append({
-                            "municipio": row["municipio"],
-                            "vereda": row["vereda"],
-                            "año": row["año"],
-                            "semestre": row["semestre"],
+                        resultado = {
                             "componente": comp,
                             "frase": row["frase"],
                             "grupo_num": clusters[i],
                             "peso_semantico": pesos[i],
                             "lineas_disponibles": row["lineas_disponibles"]
-                        })
+                        }
+                        for col_m in cols_meta:
+                            resultado[col_m] = row.get(col_m, "")
+                        resultados.append(resultado)
 
                 df_result = pd.DataFrame(resultados)
 
@@ -523,9 +521,10 @@ Frases:
 {frases_str}
 
 Responde SOLO en este formato exacto, una línea por frase numerada:
-1. Línea A, Línea B
-2. Línea C
-Sin explicaciones adicionales. Usa EXACTAMENTE los nombres de las líneas tal como aparecen arriba."""
+1. Agua y territorio, Desarrollo rural
+2. Fortalecimiento comunitario
+(usa los nombres EXACTOS de las líneas disponibles, no inventes nombres nuevos)
+Sin explicaciones adicionales."""
                     try:
                         resp = client.chat.completions.create(
                             model="llama-3.1-8b-instant",
@@ -912,4 +911,3 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
-
