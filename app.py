@@ -498,6 +498,7 @@ elif modo == "🗺️ Cartografía Social":
                         df_result.loc[mask, "lineas_inversion"] = "Sin líneas definidas"
                         continue
                    
+                   
                    frases_lote = subset["frase"].tolist()
                     lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
                     lineas_validas_set = set(l.lower() for l in lineas_disponibles)
@@ -913,6 +914,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
