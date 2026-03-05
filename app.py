@@ -556,8 +556,7 @@ Sin explicaciones adicionales."""
                     except Exception as e:
                         df_result.loc[mask, "lineas_inversion"] = f"Error: {e}"
 
-            st.success("Análisis completado.")
-            st.write("Columnas disponibles:", list(df_result.columns))
+            st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
 
             # ── SUBREGISTRO ───────────────────────────────────────
@@ -913,6 +912,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
