@@ -601,12 +601,13 @@ Sin explicaciones adicionales."""
 
             # ── LÍNEAS DE INVERSIÓN ───────────────────────────────
             st.subheader("💰 Distribución por línea de inversión")
-            lineas_canonicas = []
-            for _, fila in df_filtrado.iterrows():
-                for l in fila["lineas_disponibles"]:
-                    l_clean = l.strip().rstrip(".").strip()
-                    if l_clean and l_clean not in lineas_canonicas:
-                        lineas_canonicas.append(l_clean)
+            lineas_canonicas = [
+                "Agua y territorio",
+                "Desarrollo rural",
+                "Educación y competitividad",
+                "Infraestructura comunitaria",
+                "Fortalecimiento comunitario"
+            ]
 
             def normalizar_linea(texto):
                 texto = texto.strip().rstrip(".").strip().lower()
@@ -913,6 +914,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
