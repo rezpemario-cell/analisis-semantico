@@ -403,6 +403,7 @@ elif modo == "🗺️ Cartografía Social":
             if usar_cache:
                 st.info("✅ Mismos datos detectados — usando resultados anteriores.")
                 df_result = st.session_state.cache_result_cart
+                total_participantes = pd.to_numeric(df.get("participantes", pd.Series([0])), errors="coerce").sum() if "participantes" in df.columns else 0
             else:
 
                 # ── PARTICIPANTES ─────────────────────────────────────
@@ -926,3 +927,4 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
