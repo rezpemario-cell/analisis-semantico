@@ -371,6 +371,8 @@ elif modo == "🗺️ Cartografía Social":
     archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
 
     if archivo:
+    archivo_hash = str(hash(archivo.read()))
+        archivo.seek(0)
         df = pd.read_excel(archivo)
         df.columns = [c.strip().lower() for c in df.columns]
         st.subheader("Vista previa de tus datos")
@@ -392,7 +394,12 @@ elif modo == "🗺️ Cartografía Social":
              "bienestar social y desarrollo comunitario",
              "diagnóstico territorial participativo"])
 
+        cache_key = f"{archivo_hash}_{','.join(sorted(cols_componentes))}_{contexto}"
         if cols_componentes and st.button("▶ Analizar"):
+            if "cache_key_saved" in st.session_state and st.session_state.get("cache_key_saved") == cache_key and st.session_state.get("cache_result_cart") is not None:
+                st.success("✅ Resultados cargados desde caché — mismos datos, mismo análisis.")
+                df_result = st.session_state.cache_result_cart
+            else:
 
             # ── PARTICIPANTES ─────────────────────────────────────
             total_participantes = 0
@@ -559,6 +566,8 @@ Sin explicaciones adicionales."""
 
             st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
+            st.session_state.cache_result_cart = df_result
+            st.session_state.cache_key_saved = cache_key
 
             # ── SUBREGISTRO ───────────────────────────────────────
             st.subheader("🔎 Detección de subregistro")
@@ -914,11 +923,3 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
-
-
-
-
-
-
-
-
