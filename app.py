@@ -531,7 +531,7 @@ Sin explicaciones adicionales."""
                         resp = client.chat.completions.create(
                             model="llama-3.1-8b-instant",
                             messages=[{"role": "user", "content": prompt}],
-                            max_tokens=500
+                            max_tokens=1500
                         )
                         lineas_resp = resp.choices[0].message.content.strip().split("\n")
                         for i, frase in enumerate(frases_lote):
@@ -545,8 +545,7 @@ Sin explicaciones adicionales."""
                                                key=lambda l: sum(c not in l.lower() for c in parte.lower()))
                                     if any(palabra in mejor.lower() for palabra in parte.lower().split()[:2]):
                                         partes_normalizadas.append(mejor)
-                                    else:
-                                        partes_normalizadas.append(parte)
+                                    # Si no coincide con ninguna línea, descartar
                                 linea_final = ", ".join(partes_normalizadas)
                             else:
                                 linea_final = "No determinado"
@@ -912,6 +911,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
