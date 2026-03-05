@@ -396,10 +396,15 @@ elif modo == "🗺️ Cartografía Social":
 
         cache_key = f"{archivo_hash}_{','.join(sorted(cols_componentes))}_{contexto}"
         if cols_componentes and st.button("▶ Analizar"):
-            if "cache_key_saved" in st.session_state and st.session_state.get("cache_key_saved") == cache_key and st.session_state.get("cache_result_cart") is not None:
+            usar_cache = ("cache_key_saved" in st.session_state and 
+                         st.session_state.get("cache_key_saved") == cache_key and 
+                         st.session_state.get("cache_result_cart") is not None)
+            if usar_cache:
                 st.success("✅ Resultados cargados desde caché — mismos datos, mismo análisis.")
                 df_result = st.session_state.cache_result_cart
-            else:
+            
+            if not usar_cache:
+                pass
 
             # ── PARTICIPANTES ─────────────────────────────────────
             total_participantes = 0
@@ -564,10 +569,11 @@ Sin explicaciones adicionales."""
                                 if len(idx) > 0:
                                     df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
 
+            if not usar_cache:
+                st.session_state.cache_result_cart = df_result
+                st.session_state.cache_key_saved = cache_key
             st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
-            st.session_state.cache_result_cart = df_result
-            st.session_state.cache_key_saved = cache_key
 
             # ── SUBREGISTRO ───────────────────────────────────────
             st.subheader("🔎 Detección de subregistro")
@@ -923,3 +929,4 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
