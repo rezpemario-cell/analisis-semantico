@@ -396,183 +396,183 @@ elif modo == "🗺️ Cartografía Social":
 
         cache_key = f"{archivo_hash}_{','.join(sorted(cols_componentes))}_{contexto}"
         if cols_componentes and st.button("▶ Analizar"):
-            usar_cache = ("cache_key_saved" in st.session_state and 
-                         st.session_state.get("cache_key_saved") == cache_key and 
-                         st.session_state.get("cache_result_cart") is not None)
+            usar_cache = (
+                st.session_state.get("cache_key_saved") == cache_key and
+                st.session_state.get("cache_result_cart") is not None
+            )
             if usar_cache:
                 st.info("✅ Mismos datos detectados — usando resultados anteriores.")
                 df_result = st.session_state.cache_result_cart
+            else:
 
-            # ── PARTICIPANTES ─────────────────────────────────────
-            total_participantes = 0
-            if "participantes" in df.columns:
-                total_participantes = pd.to_numeric(df["participantes"], errors="coerce").sum()
-                st.metric("👥 Total participantes", int(total_participantes))
+                # ── PARTICIPANTES ─────────────────────────────────────
+                total_participantes = 0
+                if "participantes" in df.columns:
+                    total_participantes = pd.to_numeric(df["participantes"], errors="coerce").sum()
+                    st.metric("👥 Total participantes", int(total_participantes))
 
-            # ── PARTICIPACIÓN TERRITORIAL ─────────────────────────
-            if "municipio" in df.columns and "vereda" in df.columns:
-                st.subheader("🗺️ Participación territorial")
-                part_muni = df.groupby("municipio")["participantes"].apply(
-                    lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
-                part_muni.columns = ["Municipio", "Participantes"]
-                fig_muni = px.bar(part_muni, x="Municipio", y="Participantes",
-                                 color="Municipio", title="Participantes por municipio")
-                st.plotly_chart(fig_muni, use_container_width=True)
+                # ── PARTICIPACIÓN TERRITORIAL ─────────────────────────
+                if "municipio" in df.columns and "vereda" in df.columns:
+                    st.subheader("🗺️ Participación territorial")
+                    part_muni = df.groupby("municipio")["participantes"].apply(
+                        lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
+                    part_muni.columns = ["Municipio", "Participantes"]
+                    fig_muni = px.bar(part_muni, x="Municipio", y="Participantes",
+                                     color="Municipio", title="Participantes por municipio")
+                    st.plotly_chart(fig_muni, use_container_width=True)
 
-                part_vereda = df.groupby(["municipio", "vereda"])["participantes"].apply(
-                    lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
-                part_vereda.columns = ["Municipio", "Vereda", "Participantes"]
-                fig_vereda = px.bar(part_vereda, x="Vereda", y="Participantes",
-                                   color="Municipio", title="Participantes por vereda")
-                st.plotly_chart(fig_vereda, use_container_width=True)
+                    part_vereda = df.groupby(["municipio", "vereda"])["participantes"].apply(
+                        lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
+                    part_vereda.columns = ["Municipio", "Vereda", "Participantes"]
+                    fig_vereda = px.bar(part_vereda, x="Vereda", y="Participantes",
+                                       color="Municipio", title="Participantes por vereda")
+                    st.plotly_chart(fig_vereda, use_container_width=True)
 
-            if not usar_cache:
-             with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
+                with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
 
-                # ── FRAGMENTAR FRASES ─────────────────────────────
-                registros = []
-                for _, fila in df.iterrows():
-                    lineas_celda = str(fila.get(col_lineas, "")).split(",") if col_lineas in df.columns else []
-                    lineas_celda = [l.strip() for l in lineas_celda if l.strip()]
+                    # ── FRAGMENTAR FRASES ─────────────────────────────
+                    registros = []
+                    for _, fila in df.iterrows():
+                        lineas_celda = str(fila.get(col_lineas, "")).split(",") if col_lineas in df.columns else []
+                        lineas_celda = [l.strip() for l in lineas_celda if l.strip()]
 
+                        for comp in cols_componentes:
+                            celda = str(fila.get(comp, ""))
+                            if celda and celda != "nan":
+                                frases = [f.strip() for f in celda.split(".") if len(f.strip()) > 5]
+                                for frase in frases:
+                                    registro = {
+                                        "componente": comp,
+                                        "frase": frase,
+                                        "lineas_disponibles": lineas_celda
+                                    }
+                                    for col_m in cols_meta:
+                                        registro[col_m] = fila.get(col_m, "")
+                                    registros.append(registro)
+
+                    df_frases = pd.DataFrame(registros)
+                    st.write(f"Total de frases extraídas: {len(df_frases)}")
+
+                    textos_lista = df_frases["frase"].tolist()
+                    vectores = np.array(modelo.encode(textos_lista, show_progress_bar=False, batch_size=16))
+
+                    # ── CLUSTERING POR COMPONENTE ─────────────────────
+                    resultados = []
                     for comp in cols_componentes:
-                        celda = str(fila.get(comp, ""))
-                        if celda and celda != "nan":
-                            frases = [f.strip() for f in celda.split(".") if len(f.strip()) > 5]
-                            for frase in frases:
-                                registro = {
-                                    "componente": comp,
-                                    "frase": frase,
-                                    "lineas_disponibles": lineas_celda
-                                }
-                                for col_m in cols_meta:
-                                    registro[col_m] = fila.get(col_m, "")
-                                registros.append(registro)
+                        mask = df_frases["componente"] == comp
+                        vecs_comp = vectores[mask]
+                        subset = df_frases[mask].reset_index(drop=True)
 
-                df_frases = pd.DataFrame(registros)
-                st.write(f"Total de frases extraídas: {len(df_frases)}")
+                        if len(subset) >= 4:
+                            n_opt = encontrar_clusters_optimos(vecs_comp, max_k=min(6, len(subset)-1))
+                        else:
+                            n_opt = min(2, len(subset))
 
-                textos_lista = df_frases["frase"].tolist()
-                vectores = np.array(modelo.encode(textos_lista, show_progress_bar=False, batch_size=16))
+                        if n_opt >= 2:
+                            km = KMeans(n_clusters=n_opt, random_state=42, n_init=10)
+                            clusters = km.fit_predict(vecs_comp)
+                            sims = cosine_similarity(vecs_comp, km.cluster_centers_)
+                            pesos = sims.max(axis=1).round(3)
+                        else:
+                            clusters = [0] * len(subset)
+                            pesos = [1.0] * len(subset)
 
-                # ── CLUSTERING POR COMPONENTE ─────────────────────
-                resultados = []
-                for comp in cols_componentes:
-                    mask = df_frases["componente"] == comp
-                    vecs_comp = vectores[mask]
-                    subset = df_frases[mask].reset_index(drop=True)
+                        for i, (_, row) in enumerate(subset.iterrows()):
+                            resultado = {
+                                "componente": comp,
+                                "frase": row["frase"],
+                                "grupo_num": clusters[i],
+                                "peso_semantico": pesos[i],
+                                "lineas_disponibles": row["lineas_disponibles"]
+                            }
+                            for col_m in cols_meta:
+                                resultado[col_m] = row.get(col_m, "")
+                            resultados.append(resultado)
 
-                    if len(subset) >= 4:
-                        n_opt = encontrar_clusters_optimos(vecs_comp, max_k=min(6, len(subset)-1))
-                    else:
-                        n_opt = min(2, len(subset))
+                    df_result = pd.DataFrame(resultados)
 
-                    if n_opt >= 2:
-                        km = KMeans(n_clusters=n_opt, random_state=42, n_init=10)
-                        clusters = km.fit_predict(vecs_comp)
-                        sims = cosine_similarity(vecs_comp, km.cluster_centers_)
-                        pesos = sims.max(axis=1).round(3)
-                    else:
-                        clusters = [0] * len(subset)
-                        pesos = [1.0] * len(subset)
-
-                    for i, (_, row) in enumerate(subset.iterrows()):
-                        resultado = {
-                            "componente": comp,
-                            "frase": row["frase"],
-                            "grupo_num": clusters[i],
-                            "peso_semantico": pesos[i],
-                            "lineas_disponibles": row["lineas_disponibles"]
-                        }
-                        for col_m in cols_meta:
-                            resultado[col_m] = row.get(col_m, "")
-                        resultados.append(resultado)
-
-                df_result = pd.DataFrame(resultados)
-
-            letras = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
-            for comp in cols_componentes:
-                mask = df_result["componente"] == comp
-                grupos_unicos = sorted(df_result[mask]["grupo_num"].unique())
-                mapa = {g: f"Grupo {letras[i]}" for i, g in enumerate(grupos_unicos)}
-                df_result.loc[mask, "grupo"] = df_result.loc[mask, "grupo_num"].map(mapa)
-            if not usar_cache:
-             with st.spinner("Asociando frases a líneas de inversión con IA..."):
+                letras = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
                 for comp in cols_componentes:
                     mask = df_result["componente"] == comp
-                    subset = df_result[mask].reset_index(drop=True)
-                    if len(subset) == 0:
-                        continue
+                    grupos_unicos = sorted(df_result[mask]["grupo_num"].unique())
+                    mapa = {g: f"Grupo {letras[i]}" for i, g in enumerate(grupos_unicos)}
+                    df_result.loc[mask, "grupo"] = df_result.loc[mask, "grupo_num"].map(mapa)
+                with st.spinner("Asociando frases a líneas de inversión con IA..."):
+                    for comp in cols_componentes:
+                        mask = df_result["componente"] == comp
+                        subset = df_result[mask].reset_index(drop=True)
+                        if len(subset) == 0:
+                            continue
 
-                    lineas_disponibles = subset.iloc[0]["lineas_disponibles"]
-                    if not lineas_disponibles:
-                        df_result.loc[mask, "lineas_inversion"] = "Sin líneas definidas"
-                        continue                   
-                   
-                    frases_lote = subset["frase"].tolist()
-                    lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
-                    lineas_validas_set = set(l.lower() for l in lineas_disponibles)
-                    nombres_componentes = ["economico", "social", "ambiental", "gobernanza", "alianzas", "proyeccion", "governance", "económico", "proyección"]
+                        lineas_disponibles = subset.iloc[0]["lineas_disponibles"]
+                        if not lineas_disponibles:
+                            df_result.loc[mask, "lineas_inversion"] = "Sin líneas definidas"
+                            continue
 
-                    for inicio in range(0, len(frases_lote), 20):
-                        sublote = frases_lote[inicio:inicio+20]
-                        frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(sublote))
-                        prompt = f"""Eres un experto en desarrollo territorial con profundo conocimiento en Investigación-Acción Participativa (IAP), educación popular y etnografía crítica, en la línea de Orlando Fals Borda y Paulo Freire.
+                        frases_lote = subset["frase"].tolist()
+                        lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
+                        lineas_validas_set = set(l.lower() for l in lineas_disponibles)
+                        nombres_componentes = ["economico", "social", "ambiental", "gobernanza", "alianzas", "proyeccion", "governance", "económico", "proyección"]
 
-Estás analizando frases de una cartografía social participativa en el contexto de {contexto}. Esta cartografía no solo describe el territorio — lo interpreta desde la memoria, el conflicto, el poder y la esperanza colectiva.
+                        for inicio in range(0, len(frases_lote), 20):
+                            sublote = frases_lote[inicio:inicio+20]
+                            frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(sublote))
+                            prompt = f"""Eres un experto en desarrollo territorial con profundo conocimiento en Investigación-Acción Participativa (IAP), educación popular y etnografía crítica, en la línea de Orlando Fals Borda y Paulo Freire.
 
-Líneas de inversión disponibles (usa EXACTAMENTE estos nombres, sin modificar):
-{lineas_str}
+    Estás analizando frases de una cartografía social participativa en el contexto de {contexto}. Esta cartografía no solo describe el territorio — lo interpreta desde la memoria, el conflicto, el poder y la esperanza colectiva.
 
-Para cada frase numerada, indica a cuáles líneas de inversión corresponde. Una frase puede corresponder a varias líneas.
+    Líneas de inversión disponibles (usa EXACTAMENTE estos nombres, sin modificar):
+    {lineas_str}
 
-Frases:
-{frases_str}
+    Para cada frase numerada, indica a cuáles líneas de inversión corresponde. Una frase puede corresponder a varias líneas.
 
-Responde SOLO en este formato exacto, una línea por frase numerada:
-1. Agua y territorio, Desarrollo rural
-2. Fortalecimiento comunitario
-(usa los nombres EXACTOS de las líneas disponibles, no inventes nombres nuevos)
-Sin explicaciones adicionales."""
-                        try:
-                            resp = client.chat.completions.create(
-                                model="llama-3.1-8b-instant",
-                                messages=[{"role": "user", "content": prompt}],
-                                max_tokens=1500
-                            )
-                            lineas_resp = resp.choices[0].message.content.strip().split("\n")
-                            for i, frase in enumerate(sublote):
-                                if i < len(lineas_resp):
-                                    linea_raw = lineas_resp[i].split(". ", 1)[-1].strip().rstrip(".")
-                                    partes = [p.strip().rstrip(".") for p in linea_raw.split(",")]
-                                    partes_normalizadas = []
-                                    for parte in partes:
-                                        parte_lower = parte.lower().strip()
-                                        if any(cn in parte_lower for cn in nombres_componentes):
-                                            continue
-                                        mejor = min(lineas_disponibles,
-                                                   key=lambda l: sum(c not in l.lower() for c in parte_lower))
-                                        palabras_parte = set(parte_lower.split())
-                                        palabras_mejor = set(mejor.lower().split())
-                                        if len(palabras_parte & palabras_mejor) >= 1:
-                                            partes_normalizadas.append(mejor)
-                                    linea_final = ", ".join(partes_normalizadas) if partes_normalizadas else "No determinado"
-                                else:
-                                    linea_final = "No determinado"
-                                idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
-                                if len(idx) > 0:
-                                    df_result.loc[idx[0], "lineas_inversion"] = linea_final
-                        except Exception as e:
-                            for frase in sublote:
-                                idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
-                                if len(idx) > 0:
-                                    df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
+    Frases:
+    {frases_str}
 
-            st.session_state.cache_result_cart = df_result
+    Responde SOLO en este formato exacto, una línea por frase numerada:
+    1. Agua y territorio, Desarrollo rural
+    2. Fortalecimiento comunitario
+    (usa los nombres EXACTOS de las líneas disponibles, no inventes nombres nuevos)
+    Sin explicaciones adicionales."""
+                            try:
+                                resp = client.chat.completions.create(
+                                    model="llama-3.1-8b-instant",
+                                    messages=[{"role": "user", "content": prompt}],
+                                    max_tokens=1500
+                                )
+                                lineas_resp = resp.choices[0].message.content.strip().split("\n")
+                                for i, frase in enumerate(sublote):
+                                    if i < len(lineas_resp):
+                                        linea_raw = lineas_resp[i].split(". ", 1)[-1].strip().rstrip(".")
+                                        partes = [p.strip().rstrip(".") for p in linea_raw.split(",")]
+                                        partes_normalizadas = []
+                                        for parte in partes:
+                                            parte_lower = parte.lower().strip()
+                                            if any(cn in parte_lower for cn in nombres_componentes):
+                                                continue
+                                            mejor = min(lineas_disponibles,
+                                                       key=lambda l: sum(c not in l.lower() for c in parte_lower))
+                                            palabras_parte = set(parte_lower.split())
+                                            palabras_mejor = set(mejor.lower().split())
+                                            if len(palabras_parte & palabras_mejor) >= 1:
+                                                partes_normalizadas.append(mejor)
+                                        linea_final = ", ".join(partes_normalizadas) if partes_normalizadas else "No determinado"
+                                    else:
+                                        linea_final = "No determinado"
+                                    idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
+                                    if len(idx) > 0:
+                                        df_result.loc[idx[0], "lineas_inversion"] = linea_final
+                            except Exception as e:
+                                for frase in sublote:
+                                    idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
+                                    if len(idx) > 0:
+                                        df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
+
+                st.session_state.cache_result_cart = df_result
                 st.session_state.cache_key_saved = cache_key
-            st.success("Análisis completado.")            
+                st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
-            
+
             # ── SUBREGISTRO ───────────────────────────────────────
             st.subheader("🔎 Detección de subregistro")
             for a in detectar_subregistro(df_result):
@@ -614,13 +614,12 @@ Sin explicaciones adicionales."""
 
             # ── LÍNEAS DE INVERSIÓN ───────────────────────────────
             st.subheader("💰 Distribución por línea de inversión")
-            lineas_canonicas = [
-                "Agua y territorio",
-                "Desarrollo rural",
-                "Educación y competitividad",
-                "Infraestructura comunitaria",
-                "Fortalecimiento comunitario"
-            ]
+            lineas_canonicas = []
+            for _, fila in df_filtrado.iterrows():
+                for l in fila["lineas_disponibles"]:
+                    l_clean = l.strip().rstrip(".").strip()
+                    if l_clean and l_clean not in lineas_canonicas:
+                        lineas_canonicas.append(l_clean)
 
             def normalizar_linea(texto):
                 texto = texto.strip().rstrip(".").strip().lower()
@@ -927,9 +926,3 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
-
-
-
-
-
-
