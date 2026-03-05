@@ -371,7 +371,7 @@ elif modo == "🗺️ Cartografía Social":
     archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
 
     if archivo:
-    archivo_hash = str(hash(archivo.read()))
+        archivo_hash = str(hash(archivo.read()))
         archivo.seek(0)
         df = pd.read_excel(archivo)
         df.columns = [c.strip().lower() for c in df.columns]
@@ -927,5 +927,6 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
