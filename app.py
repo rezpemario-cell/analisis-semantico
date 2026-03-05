@@ -441,7 +441,8 @@ elif modo == "🗺️ Cartografía Social":
                 df_frases = pd.DataFrame(registros)
                 st.write(f"Total de frases extraídas: {len(df_frases)}")
 
-                vectores = modelo.encode(df_frases["frase"].tolist(), show_progress_bar=False)
+                textos_lista = df_frases["frase"].tolist()
+                vectores = np.array(modelo.encode(textos_lista, show_progress_bar=False, batch_size=16))
 
                 # ── CLUSTERING POR COMPONENTE ─────────────────────
                 resultados = []
@@ -911,3 +912,4 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
