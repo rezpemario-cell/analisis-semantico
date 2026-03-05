@@ -921,9 +921,3 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
-
-
-
-
-
-
