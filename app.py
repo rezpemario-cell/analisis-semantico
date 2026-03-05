@@ -794,10 +794,14 @@ Frases más representativas:
 
             # Pre-calcular datos para Excel (mismos que la app)
             # Categorización por componente (calculada una sola vez)
-            cat_por_componente = {}
-            for comp in comp_filtro:
-                frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
-                cat_por_componente[comp] = categorizar_hallazgos(frases_comp, contexto)
+            if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
+                cat_por_componente = {}
+                for comp in comp_filtro:
+                    frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
+                    cat_por_componente[comp] = categorizar_hallazgos(frases_comp, contexto)
+                st.session_state.cache_cat_cart = cat_por_componente
+            else:
+                cat_por_componente = st.session_state.cache_cat_cart
 
             st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
@@ -927,4 +931,5 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
