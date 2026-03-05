@@ -399,12 +399,10 @@ elif modo == "🗺️ Cartografía Social":
             usar_cache = ("cache_key_saved" in st.session_state and 
                          st.session_state.get("cache_key_saved") == cache_key and 
                          st.session_state.get("cache_result_cart") is not None)
-            if usar_cache:
+           if usar_cache:
                 st.success("✅ Resultados cargados desde caché — mismos datos, mismo análisis.")
                 df_result = st.session_state.cache_result_cart
-            
-            if not usar_cache:
-                pass
+                st.stop()
 
             # ── PARTICIPANTES ─────────────────────────────────────
             total_participantes = 0
@@ -929,4 +927,5 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
