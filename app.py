@@ -372,6 +372,7 @@ elif modo == "🗺️ Cartografía Social":
 
     if archivo:
         df = pd.read_excel(archivo)
+        df.columns = [c.strip().lower() for c in df.columns]
         st.subheader("Vista previa de tus datos")
         st.dataframe(df.head())
 
@@ -912,4 +913,5 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
