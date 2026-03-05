@@ -882,6 +882,10 @@ Frases más representativas:
                                 vectores_vistos_exp.append(modelo.encode([frase])[0])
                     pd.DataFrame(frases_rep_export).to_excel(writer, sheet_name="Frases representativas", index=False)
 
+                    # Hoja 10 — Tabla detallada
+                    cols_tabla = [c for c in ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"] if c in df_filtrado.columns]
+                    df_filtrado[cols_tabla].to_excel(writer, sheet_name="Tabla detallada", index=False)
+                    
                     # Hoja 9 — Categorización
                     cat_export = []
                     cat_export.append({"Componente": "NOTA", "Categorización": "⚠️ Generada en descarga — puede diferir de la vista en pantalla"})
@@ -907,5 +911,6 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
