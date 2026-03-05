@@ -775,31 +775,52 @@ Frases más representativas:
 
             # ── DESCARGA ──────────────────────────────────────────
             st.session_state.resultados_cart = df_filtrado
+
+            # Pre-calcular datos para Excel (mismos que la app)
+            # Categorización por componente (calculada una sola vez)
+            cat_por_componente = {}
+            for comp in comp_filtro:
+                frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
+                cat_por_componente[comp] = categorizar_hallazgos(frases_comp, contexto)
+
             st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
             with col1:
-                # ── CONSTRUIR EXCEL MULTI-HOJA ────────────────────
                 buffer_cart = io.BytesIO()
-                with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:                    
+                with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:
+
                     # Hoja 1 — Datos completos
                     cols_descarga = ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
-                    df_filtrado[cols_descarga].to_excel(writer, sheet_name="Datos completos", index=False)
+                    cols_disponibles = [c for c in cols_descarga if c in df_filtrado.columns]
+                    df_filtrado[cols_disponibles].to_excel(writer, sheet_name="Datos completos", index=False)
 
                     # Hoja 2 — Distribución por componente
                     conteo_comp.to_excel(writer, sheet_name="Distribucion componentes", index=False)
 
-                    # Hoja 3 — Líneas de inversión
-                    if todas_lineas:
-                        df_lineas = pd.DataFrame({"linea": todas_lineas})
-                        conteo_lineas = df_lineas["linea"].value_counts().reset_index()
-                        conteo_lineas.columns = ["Línea de inversión", "Frecuencia"]
-                        conteo_lineas.to_excel(writer, sheet_name="Lineas de inversion", index=False)
+                    # Hoja 3 — Líneas de inversión (misma normalización que la app)
+                    lineas_export = []
+                    for lineas_str in df_filtrado["lineas_inversion"]:
+                        for l in str(lineas_str).split(","):
+                            normalizada = normalizar_linea(l)
+                            if normalizada:
+                                lineas_export.append(normalizada)
+                    if lineas_export:
+                        df_lineas_exp = pd.DataFrame({"linea": lineas_export})
+                        conteo_lineas_exp = df_lineas_exp["linea"].value_counts().reset_index()
+                        conteo_lineas_exp.columns = ["Línea de inversión", "Frecuencia"]
+                        conteo_lineas_exp.to_excel(writer, sheet_name="Lineas de inversion", index=False)
 
-                    # Hoja 4 — Cruce componente x línea
-                    if cruce_data:
-                        df_cruce_export = pd.DataFrame(cruce_data)
-                        pivot_export = df_cruce_export.groupby(["Componente", "Línea"]).size().reset_index(name="Cantidad")
-                        pivot_export.to_excel(writer, sheet_name="Cruce componente x linea", index=False)
+                    # Hoja 4 — Cruce componente x línea (misma normalización que la app)
+                    cruce_export = []
+                    for _, row in df_filtrado.iterrows():
+                        for l in str(row["lineas_inversion"]).split(","):
+                            normalizada = normalizar_linea(l)
+                            if normalizada:
+                                cruce_export.append({"Componente": row["componente"], "Línea": normalizada})
+                    if cruce_export:
+                        df_cruce_exp = pd.DataFrame(cruce_export)
+                        pivot_exp = df_cruce_exp.groupby(["Componente", "Línea"]).size().reset_index(name="Cantidad")
+                        pivot_exp.to_excel(writer, sheet_name="Cruce componente x linea", index=False)
 
                     # Hoja 5 — Grupos por componente
                     grupos_export = []
@@ -842,27 +863,27 @@ Frases más representativas:
                                 relevancia = "Alta 🔴" if peso >= 0.85 else ("Media 🟡" if peso >= 0.65 else "Baja 🟢")
                                 grupo_frase = row["grupo"]
                                 otras = subset_comp[subset_comp["grupo"] == grupo_frase]["frase"].tolist()[:3]
+                                lineas_frase = str(row["lineas_inversion"])
                                 frases_rep_export.append({
                                     "Componente": comp,
                                     "Frase": frase,
                                     "Peso": peso,
                                     "Relevancia": relevancia,
                                     "Variaciones similares": " | ".join(otras),
-                                    "Líneas de inversión": row["lineas_inversion"]
+                                    "Líneas de inversión": lineas_frase
                                 })
                                 frases_vistas_exp.append(frase)
                                 vectores_vistos_exp.append(modelo.encode([frase])[0])
                     pd.DataFrame(frases_rep_export).to_excel(writer, sheet_name="Frases representativas", index=False)
 
-                    # Hoja 9 — Categorización (texto plano por componente)
+                    # Hoja 9 — Categorización (misma que la app)
                     cat_export = []
-                    for comp in comp_filtro:
-                        frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
-                        cat_texto = categorizar_hallazgos(frases_comp, contexto)
+                    for comp, cat_texto in cat_por_componente.items():
                         for linea in cat_texto.split("\n"):
                             if linea.strip():
                                 cat_export.append({"Componente": comp, "Categorización": linea.strip()})
-                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion hallazgos", index=False)                    
+                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion hallazgos", index=False)
+
                 buffer_cart.seek(0)
                 st.download_button(
                     "⬇ Descargar análisis completo Excel",
@@ -879,3 +900,4 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
