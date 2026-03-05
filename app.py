@@ -400,9 +400,9 @@ elif modo == "🗺️ Cartografía Social":
                          st.session_state.get("cache_key_saved") == cache_key and 
                          st.session_state.get("cache_result_cart") is not None)
             if usar_cache:
-                st.success("✅ Resultados cargados desde caché — mismos datos, mismo análisis.")
+                st.info("✅ Mismos datos detectados — usando resultados anteriores.")
                 df_result = st.session_state.cache_result_cart
-                st.stop()
+            else:
 
             # ── PARTICIPANTES ─────────────────────────────────────
             total_participantes = 0
@@ -567,12 +567,11 @@ Sin explicaciones adicionales."""
                                 if len(idx) > 0:
                                     df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
 
-            if not usar_cache:
-                st.session_state.cache_result_cart = df_result
+            st.session_state.cache_result_cart = df_result
                 st.session_state.cache_key_saved = cache_key
             st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
-
+            
             # ── SUBREGISTRO ───────────────────────────────────────
             st.subheader("🔎 Detección de subregistro")
             for a in detectar_subregistro(df_result):
@@ -927,6 +926,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
