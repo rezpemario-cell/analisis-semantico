@@ -498,31 +498,22 @@ elif modo == "🗺️ Cartografía Social":
                         df_result.loc[mask, "lineas_inversion"] = "Sin líneas definidas"
                         continue
 
-                    frases_lote = subset["frase"].tolist()
+                   frases_lote = subset["frase"].tolist()
                     lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
                     lineas_validas_set = set(l.lower() for l in lineas_disponibles)
-                    
-                    # Procesar en sublotes de 20 frases
+                    nombres_componentes = ["economico", "social", "ambiental", "gobernanza", "alianzas", "proyeccion", "governance", "económico", "proyección"]
+
                     for inicio in range(0, len(frases_lote), 20):
                         sublote = frases_lote[inicio:inicio+20]
                         frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(sublote))
-
-                    prompt = f"""Eres un experto en desarrollo territorial con profundo conocimiento en Investigación-Acción Participativa (IAP), educación popular y etnografía crítica, en la línea de Orlando Fals Borda y Paulo Freire.
+                        prompt = f"""Eres un experto en desarrollo territorial con profundo conocimiento en Investigación-Acción Participativa (IAP), educación popular y etnografía crítica, en la línea de Orlando Fals Borda y Paulo Freire.
 
 Estás analizando frases de una cartografía social participativa en el contexto de {contexto}. Esta cartografía no solo describe el territorio — lo interpreta desde la memoria, el conflicto, el poder y la esperanza colectiva.
-
-Los componentes del ejercicio buscan identificar:
-- SOCIAL: Actores sociales, relaciones, problemáticas, prácticas culturales, equipamientos (escuelas, iglesias, parques, vías, puestos de salud), capital social.
-- AMBIENTAL: Recursos naturales, problemáticas ambientales, usos del suelo, zonas de riesgo, prácticas de cuidado o deterioro, percepción comunitaria del entorno.
-- ECONOMICO: Actividades productivas, economías de subsistencia, fuentes de ingreso, circuitos económicos locales, dependencias externas, emprendimientos.
-- ALIANZAS: Presencia institucional (ONG, entidades públicas, universidades, empresas), tipo de relación con la comunidad, proyectos vigentes, vacíos institucionales.
-- GOBERNANZA: Estructuras de autoridad, liderazgos reales vs. formales, participación ciudadana, conflictos de poder, incidencia política.
-- PROYECCION: Sueños, esperanza organizada, visión de desarrollo, propuestas de transformación.
 
 Líneas de inversión disponibles (usa EXACTAMENTE estos nombres, sin modificar):
 {lineas_str}
 
-Para cada frase numerada, interpreta su significado en el contexto territorial y comunitario, luego indica a cuáles líneas de inversión corresponde. Una frase puede corresponder a varias líneas.
+Para cada frase numerada, indica a cuáles líneas de inversión corresponde. Una frase puede corresponder a varias líneas.
 
 Frases:
 {frases_str}
@@ -532,38 +523,39 @@ Responde SOLO en este formato exacto, una línea por frase numerada:
 2. Fortalecimiento comunitario
 (usa los nombres EXACTOS de las líneas disponibles, no inventes nombres nuevos)
 Sin explicaciones adicionales."""
-                    try:
-                        resp = client.chat.completions.create(
-                            model="llama-3.1-8b-instant",
-                            messages=[{"role": "user", "content": prompt}],
-                            max_tokens=1500
-                        )
-                        lineas_resp = resp.choices[0].message.content.strip().split("\n")
-                        for i, frase in enumerate(sublote):
-                            if i < len(lineas_resp):
-                                linea_raw = lineas_resp[i].split(". ", 1)[-1].strip().rstrip(".")
-                                # Normalizar contra las líneas disponibles
-                                partes = [p.strip().rstrip(".") for p in linea_raw.split(",")]
-                                partes_normalizadas = []
-                                for parte in partes:
-                                    mejor = min(lineas_disponibles,
-                                               key=lambda l: sum(c not in l.lower() for c in parte.lower()))
-                                   palabras_parte = set(parte.lower().split())
-                                    palabras_mejor = set(mejor.lower().split())
-                                    if len(palabras_parte & palabras_mejor) >= 1 and parte.lower() not in lineas_validas_set == False:
-                                        if not any(comp_nombre in parte.lower() for comp_nombre in ["economico", "social", "ambiental", "gobernanza", "alianzas", "proyeccion", "governance"]):
+                        try:
+                            resp = client.chat.completions.create(
+                                model="llama-3.1-8b-instant",
+                                messages=[{"role": "user", "content": prompt}],
+                                max_tokens=1500
+                            )
+                            lineas_resp = resp.choices[0].message.content.strip().split("\n")
+                            for i, frase in enumerate(sublote):
+                                if i < len(lineas_resp):
+                                    linea_raw = lineas_resp[i].split(". ", 1)[-1].strip().rstrip(".")
+                                    partes = [p.strip().rstrip(".") for p in linea_raw.split(",")]
+                                    partes_normalizadas = []
+                                    for parte in partes:
+                                        parte_lower = parte.lower().strip()
+                                        if any(cn in parte_lower for cn in nombres_componentes):
+                                            continue
+                                        mejor = min(lineas_disponibles,
+                                                   key=lambda l: sum(c not in l.lower() for c in parte_lower))
+                                        palabras_parte = set(parte_lower.split())
+                                        palabras_mejor = set(mejor.lower().split())
+                                        if len(palabras_parte & palabras_mejor) >= 1:
                                             partes_normalizadas.append(mejor)
-                                linea_final = ", ".join(partes_normalizadas)
-                            else:
-                                linea_final = "No determinado"
-                            idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
-                            if len(idx) > 0:
-                                df_result.loc[idx[0], "lineas_inversion"] = linea_final
-                    except Exception as e:
-                        for frase in sublote:
-                            idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
-                            if len(idx) > 0:
-                                df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
+                                    linea_final = ", ".join(partes_normalizadas) if partes_normalizadas else "No determinado"
+                                else:
+                                    linea_final = "No determinado"
+                                idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
+                                if len(idx) > 0:
+                                    df_result.loc[idx[0], "lineas_inversion"] = linea_final
+                        except Exception as e:
+                            for frase in sublote:
+                                idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
+                                if len(idx) > 0:
+                                    df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
 
             st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
@@ -921,3 +913,4 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
