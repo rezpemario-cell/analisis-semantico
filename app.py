@@ -801,29 +801,6 @@ Frases más representativas:
             # ── DESCARGA ──────────────────────────────────────────
             st.session_state.resultados_cart = df_filtrado
 
-            # Pre-calcular datos para Excel (mismos que la app)
-            # Categorización por componente (calculada una sola vez)
-            if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
-                cat_por_componente = {}
-                cat_por_vereda = {}
-                veredas_unicas = sorted(df_filtrado["vereda"].dropna().unique())
-                for comp in comp_filtro:
-                    frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
-                    cat_por_componente[comp] = categorizar_hallazgos(frases_comp, contexto)
-                    cat_por_vereda[comp] = {}
-                    for vereda in veredas_unicas:
-                        frases_vereda = df_filtrado[
-                            (df_filtrado["componente"] == comp) &
-                            (df_filtrado["vereda"] == vereda)
-                        ]["frase"].tolist()
-                        if frases_vereda:
-                            cat_por_vereda[comp][vereda] = categorizar_hallazgos(frases_vereda, contexto)
-                st.session_state.cache_cat_cart = cat_por_componente
-                st.session_state.cache_cat_vereda = cat_por_vereda
-            else:
-                cat_por_componente = st.session_state.cache_cat_cart
-                cat_por_vereda = st.session_state.cache_cat_vereda
-
             st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
             with col1:
@@ -960,6 +937,7 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
 
