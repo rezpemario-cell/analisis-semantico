@@ -705,6 +705,28 @@ elif modo == "🗺️ Cartografía Social":
                           title="Cohesión semántica promedio")
             st.plotly_chart(fig_p, use_container_width=True)
 
+            # ── CALCULAR CATEGORIZACIÓN (caché) ────────────────
+            if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
+                cat_por_componente = {}
+                cat_por_vereda = {}
+                veredas_unicas_cat = sorted(df_filtrado["vereda"].dropna().unique())
+                for comp in comp_filtro:
+                    frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
+                    cat_por_componente[comp] = categorizar_hallazgos(frases_comp, contexto)
+                    cat_por_vereda[comp] = {}
+                    for vereda in veredas_unicas_cat:
+                        frases_vereda = df_filtrado[
+                            (df_filtrado["componente"] == comp) &
+                            (df_filtrado["vereda"] == vereda)
+                        ]["frase"].tolist()
+                        if frases_vereda:
+                            cat_por_vereda[comp][vereda] = categorizar_hallazgos(frases_vereda, contexto)
+                st.session_state.cache_cat_cart = cat_por_componente
+                st.session_state.cache_cat_vereda = cat_por_vereda
+            else:
+                cat_por_componente = st.session_state.cache_cat_cart
+                cat_por_vereda = st.session_state.cache_cat_vereda
+
             # ── CATEGORIZACIÓN ────────────────────────────────────
             st.subheader("🗂️ Categorización de hallazgos por componente")
             for comp in comp_filtro:
@@ -937,7 +959,3 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
-
-
-
-
