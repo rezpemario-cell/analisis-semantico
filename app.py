@@ -20,12 +20,12 @@ from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 import plotly.express as px
 from umap import UMAP
-from groq import Groq
+from mistralai import Mistral
 
 st.set_page_config(page_title="Análisis Semántico", layout="wide")
 st.title("🔍 Análisis Semántico de Encuestas y Cartografía Social")
 
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+client = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
 
 @st.cache_resource
 def cargar_modelo():
@@ -931,5 +931,6 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
