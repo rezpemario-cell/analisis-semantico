@@ -709,10 +709,15 @@ elif modo == "🗺️ Cartografía Social":
             st.subheader("🗂️ Categorización de hallazgos por componente")
             for comp in comp_filtro:
                 with st.expander(f"📌 {comp}"):
-                    frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
-                    with st.spinner(f"Analizando {comp}..."):
-                        cat = categorizar_hallazgos(frases_comp, contexto)
-                    st.markdown(cat)
+                    st.markdown(cat_por_componente.get(comp, "No disponible"))
+
+            st.subheader("🗂️ Categorización de hallazgos por vereda")
+            veredas_unicas = sorted(df_filtrado["vereda"].dropna().unique())
+            vereda_sel = st.selectbox("Selecciona una vereda:", veredas_unicas)
+            for comp in comp_filtro:
+                if vereda_sel in cat_por_vereda.get(comp, {}):
+                    with st.expander(f"📌 {comp}"):
+                        st.markdown(cat_por_vereda[comp][vereda_sel])
 
             # ── RESUMEN EJECUTIVO ─────────────────────────────────
             st.subheader("📋 Resumen ejecutivo por componente")
@@ -799,13 +804,26 @@ Frases más representativas:
             # Pre-calcular datos para Excel (mismos que la app)
             # Categorización por componente (calculada una sola vez)
             if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
+                if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
                 cat_por_componente = {}
+                cat_por_vereda = {}
+                veredas_unicas = sorted(df_filtrado["vereda"].dropna().unique())
                 for comp in comp_filtro:
                     frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
                     cat_por_componente[comp] = categorizar_hallazgos(frases_comp, contexto)
+                    cat_por_vereda[comp] = {}
+                    for vereda in veredas_unicas:
+                        frases_vereda = df_filtrado[
+                            (df_filtrado["componente"] == comp) &
+                            (df_filtrado["vereda"] == vereda)
+                        ]["frase"].tolist()
+                        if frases_vereda:
+                            cat_por_vereda[comp][vereda] = categorizar_hallazgos(frases_vereda, contexto)
                 st.session_state.cache_cat_cart = cat_por_componente
+                st.session_state.cache_cat_vereda = cat_por_vereda
             else:
                 cat_por_componente = st.session_state.cache_cat_cart
+                cat_por_vereda = st.session_state.cache_cat_vereda
 
             st.subheader("⬇ Descargas")
             col1, col2 = st.columns(2)
@@ -910,14 +928,22 @@ Frases más representativas:
                     cols_tabla = [c for c in ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"] if c in df_filtrado.columns]
                     df_filtrado[cols_tabla].to_excel(writer, sheet_name="Tabla detallada", index=False)
                     
-                    # Hoja 9 — Categorización
+                    # Hoja 9 — Categorización por componente
                     cat_export = []
-                    cat_export.append({"Componente": "NOTA", "Categorización": "⚠️ Generada en descarga — puede diferir de la vista en pantalla"})
                     for comp, cat_texto in cat_por_componente.items():
                         for linea in cat_texto.split("\n"):
                             if linea.strip():
-                                cat_export.append({"Componente": comp, "Categorización": linea.strip()})
-                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion hallazgos", index=False)
+                                cat_export.append({"Vereda": "TODAS", "Componente": comp, "Categorización": linea.strip()})
+                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion componente", index=False)
+
+                    # Hoja 10 — Categorización por vereda
+                    cat_vereda_export = []
+                    for comp, veredas in cat_por_vereda.items():
+                        for vereda, cat_texto in veredas.items():
+                            for linea in cat_texto.split("\n"):
+                                if linea.strip():
+                                    cat_vereda_export.append({"Vereda": vereda, "Componente": comp, "Categorización": linea.strip()})
+                    pd.DataFrame(cat_vereda_export).to_excel(writer, sheet_name="Categorizacion por vereda", index=False)
 
                 buffer_cart.seek(0)
                 st.download_button(
@@ -935,6 +961,5 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
-
 
 
