@@ -54,7 +54,7 @@ Analiza estas frases de un grupo semántico en el contexto de {contexto}:
 Genera UN título descriptivo de máximo 6 palabras que capture el tema central.
 Responde SOLO con el título, sin explicaciones."""
         try:
-            resp = client.chat.completions.create(
+            resp = client.chat.complete(
                 model="llama-3.1-8b-instant",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=20
@@ -76,7 +76,7 @@ Líneas de inversión disponibles:
 ¿A cuáles líneas de inversión corresponde esta frase? Puede ser una o varias.
 Responde SOLO con los nombres exactos de las líneas separados por coma, sin explicaciones."""
     try:
-        resp = client.chat.completions.create(
+        resp = client.chat.complete(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=100
@@ -109,7 +109,7 @@ ALERTAS:
 
 Máximo 3 puntos por categoría. Si no hay, escribe "No identificados"."""
     try:
-        resp = client.chat.completions.create(
+        resp = client.chat.complete(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500
@@ -133,7 +133,7 @@ Genera un informe ejecutivo profesional con:
 
 Lenguaje profesional, directo y orientado a toma de decisiones."""
     try:
-        resp = client.chat.completions.create(
+        resp = client.chat.complete(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1500
@@ -536,7 +536,7 @@ elif modo == "🗺️ Cartografía Social":
     (usa los nombres EXACTOS de las líneas disponibles, no inventes nombres nuevos)
     Sin explicaciones adicionales."""
                             try:
-                                resp = client.chat.completions.create(
+                                resp = client.chat.complete(
                                     model="llama-3.1-8b-instant",
                                     messages=[{"role": "user", "content": prompt}],
                                     max_tokens=1500
@@ -931,6 +931,4 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
-
-
 
