@@ -804,7 +804,6 @@ Frases más representativas:
             # Pre-calcular datos para Excel (mismos que la app)
             # Categorización por componente (calculada una sola vez)
             if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
-                if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
                 cat_por_componente = {}
                 cat_por_vereda = {}
                 veredas_unicas = sorted(df_filtrado["vereda"].dropna().unique())
@@ -961,5 +960,6 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
