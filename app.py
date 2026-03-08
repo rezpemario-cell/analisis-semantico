@@ -381,10 +381,14 @@ elif modo == "🗺️ Cartografía Social":
         columnas = list(df.columns)
 
         # ── COLUMNAS FIJAS ────────────────────────────────────────
-        cols_meta = [c for c in columnas if any(palabra in c.lower() for palabra in ["año", "semestre", "municipio", "vereda", "participantes", "anno", "ano", "semestre 1 o 2", "cantidad de participantes"])]
-        col_lineas = "lineas de inversion"
+        # ── LEER CONFIGURACIÓN DESDE FILA 2 ──────────────────────
+        fila_config = df.iloc[0]  # fila 2 del Excel = fila 0 del dataframe
+        df = df.iloc[1:].reset_index(drop=True)  # eliminar fila de configuración
 
-        cols_componentes_default = [c for c in columnas if c not in cols_meta + [col_lineas]]
+        cols_meta = [c for c in columnas if str(fila_config[c]).strip().lower() == "meta"]
+        col_lineas_list = [c for c in columnas if str(fila_config[c]).strip().lower() == "lineas"]
+        col_lineas = col_lineas_list[0] if col_lineas_list else "lineas de inversion"
+        cols_componentes_default = [c for c in columnas if str(fila_config[c]).strip().lower() == "componente"]
         cols_componentes = st.multiselect("Selecciona los componentes a analizar:",
                                           cols_componentes_default,
                                           default=cols_componentes_default)
@@ -931,5 +935,6 @@ Frases más representativas:
                         file_name="informe_cartografia.txt",
                         key="descarga_informe_cart"
                     )
+
 
 
