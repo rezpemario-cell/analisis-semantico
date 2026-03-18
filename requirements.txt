@@ -9,5 +9,3 @@ numpy
 scipy
 altair==5.4.1
 mistralai
-
-
