@@ -433,6 +433,23 @@ elif modo == "🗺️ Cartografía Social":
                                        color="Municipio", title="Participantes por vereda")
                     st.plotly_chart(fig_vereda, use_container_width=True)
 
+                    # ── GRÁFICOS AÑO Y SEMESTRE ───────────────────
+                    if "año" in df.columns:
+                        part_año = df.groupby("año")["participantes"].apply(
+                            lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
+                        part_año.columns = ["Año", "Participantes"]
+                        fig_año = px.bar(part_año, x="Año", y="Participantes",
+                                        color="Año", title="Participantes por año")
+                        st.plotly_chart(fig_año, use_container_width=True)
+
+                    if "semestre" in df.columns:
+                        part_sem = df.groupby("semestre")["participantes"].apply(
+                            lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
+                        part_sem.columns = ["Semestre", "Participantes"]
+                        fig_sem = px.bar(part_sem, x="Semestre", y="Participantes",
+                                        color="Semestre", title="Participantes por semestre")
+                        st.plotly_chart(fig_sem, use_container_width=True)
+                        
                 with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
 
                     # ── FRAGMENTAR FRASES ─────────────────────────────
