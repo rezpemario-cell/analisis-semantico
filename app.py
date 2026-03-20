@@ -441,16 +441,19 @@ elif modo == "🗺️ Cartografía Social":
                             lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
                         part_año.columns = ["Año", "Participantes"]
                         fig_año = px.bar(part_año, x="Año", y="Participantes",
-                                        color="Año", title="Participantes por año",
-                                        category_orders={"Año": sorted(part_año["Año"].unique())})
+                                        color="Año", title="Participantes por año")
+                        fig_año.update_xaxes(type="category")
                         st.plotly_chart(fig_año, use_container_width=True)
 
                     if "semestre" in df.columns:
+                        df["semestre"] = pd.to_numeric(df["semestre"], errors="coerce").fillna(0).astype(int).astype(str)
+                        df["semestre"] = df["semestre"].replace("0", "")
                         part_sem = df.groupby("semestre")["participantes"].apply(
                             lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
                         part_sem.columns = ["Semestre", "Participantes"]
                         fig_sem = px.bar(part_sem, x="Semestre", y="Participantes",
                                         color="Semestre", title="Participantes por semestre")
+                        fig_sem.update_xaxes(type="category")
                         st.plotly_chart(fig_sem, use_container_width=True)
                         
                 with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
