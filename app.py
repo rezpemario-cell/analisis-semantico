@@ -435,7 +435,8 @@ elif modo == "🗺️ Cartografía Social":
 
                     # ── GRÁFICOS AÑO Y SEMESTRE ───────────────────
                     if "año" in df.columns:
-                        df["año"] = df["año"].astype(str).str.replace(".0", "", regex=False)
+                        df["año"] = pd.to_numeric(df["año"], errors="coerce").fillna(0).astype(int).astype(str)
+                        df["año"] = df["año"].replace("0", "")
                         part_año = df.groupby("año")["participantes"].apply(
                             lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
                         part_año.columns = ["Año", "Participantes"]
