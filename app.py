@@ -435,11 +435,13 @@ elif modo == "🗺️ Cartografía Social":
 
                     # ── GRÁFICOS AÑO Y SEMESTRE ───────────────────
                     if "año" in df.columns:
+                        df["año"] = df["año"].astype(str).str.replace(".0", "", regex=False)
                         part_año = df.groupby("año")["participantes"].apply(
                             lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
                         part_año.columns = ["Año", "Participantes"]
                         fig_año = px.bar(part_año, x="Año", y="Participantes",
-                                        color="Año", title="Participantes por año")
+                                        color="Año", title="Participantes por año",
+                                        category_orders={"Año": sorted(part_año["Año"].unique())})
                         st.plotly_chart(fig_año, use_container_width=True)
 
                     if "semestre" in df.columns:
