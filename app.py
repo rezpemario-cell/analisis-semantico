@@ -859,6 +859,16 @@ Frases más representativas:
                     cols_disponibles = [c for c in cols_descarga if c in df_filtrado.columns]
                     df_export = df_filtrado[cols_disponibles].reset_index(drop=True)
                     df_export.to_excel(writer, sheet_name="Datos completos", index=False)
+                    # Agregar nota sobre peso_semantico
+                    ws1 = writer.sheets["Datos completos"]
+                    ws1.cell(row=1, column=len(cols_disponibles)+2).value = "NOTA: peso_semantico"
+                    ws1.cell(row=2, column=len(cols_disponibles)+2).value = (
+                        "El peso semántico (0-1) mide qué tan representativa es cada frase de su grupo semántico. "
+                        "Se calcula como similitud coseno entre el vector de la frase y el centroide del grupo "
+                        "(promedio vectorial de todas las frases del grupo). "
+                        "Valor 1 = frase perfectamente representativa del grupo. "
+                        "No tiene fórmula Excel porque requiere vectores de 768 dimensiones generados por el modelo de lenguaje."
+                    )
 
                     # Calcular columnas clave en Datos completos
                     col_idx = {col: get_column_letter(i+1) for i, col in enumerate(cols_disponibles)}
@@ -891,12 +901,18 @@ Frases más representativas:
                     if lineas_export:
                         lineas_unicas = sorted(set(lineas_export))
                         ws3 = writer.book.create_sheet("Lineas de inversion")
-                        ws3.append(["Línea de inversión", "Frecuencia", "Nota"])
+                        ws3.append(["Línea de inversión", "Frecuencia", "Fórmula Excel"])
                         ws3.append(["NOTA", "Una frase puede tener varias líneas — se cuenta cada aparición", ""])
-                        for linea in lineas_unicas:
-                            frecuencia = lineas_export.count(linea)
-                            nota = f"Conteo de apariciones de esta línea en columna {col_li}"
-                            ws3.append([linea, frecuencia, nota])
+                        n_datos = len(df_export)
+                        for i, linea in enumerate(lineas_unicas):
+                            rn = i + 3
+                            # Formula: cuenta cuántas veces aparece el nombre de la línea en la columna lineas_inversion
+                            f_linea = (
+                                f"=SUMPRODUCT((LEN({dc}!${col_li}$2:${col_li}${n_filas})"
+                                f'-LEN(SUSTITUIR({dc}!${col_li}$2:${col_li}${n_filas},A{rn},"")))'
+                                f"/LEN(A{rn}))"
+                            )
+                            ws3.append([linea, f_linea, f"SUMPRODUCT+SUSTITUIR en columna {col_li} de Datos completos"])
 
                     # ── HOJA 4: CRUCE COMPONENTE x LÍNEA ──
                     cruce_export = []
@@ -910,10 +926,15 @@ Frases más representativas:
                         df_cruce_exp = pd.DataFrame(cruce_export)
                         pivot_exp = df_cruce_exp.groupby(["Componente", "Línea"]).size().reset_index(name="Cantidad")
                         ws4 = writer.book.create_sheet("Cruce componente x linea")
-                        ws4.append(["Componente", "Línea", "Cantidad", "Nota fórmula"])
+                        ws4.append(["Componente", "Línea", "Cantidad", "Fórmula Excel"])
                         for _, row in pivot_exp.iterrows():
-                            nota = f"COUNTIFS col {col_comp}=Componente Y col {col_li} contiene Línea"
-                            ws4.append([row["Componente"], row["Línea"], row["Cantidad"], nota])
+                            rn = ws4.max_row + 1
+                            # COUNTIFS: columna componente = A y columna lineas contiene B
+                            f_cruce = (
+                                f"=SUMPRODUCT(({dc}!${col_comp}$2:${col_comp}${n_filas}=A{rn})*"
+                                f"(ISNUMBER(SEARCH(B{rn},{dc}!${col_li}$2:${col_li}${n_filas}))))"
+                            )
+                            ws4.append([row["Componente"], row["Línea"], f_cruce, f"SUMPRODUCT col {col_comp}=A y col {col_li} contiene B"])
 
                     # ── HOJA 5: GRUPOS POR COMPONENTE ──
                     grupos_export = []
@@ -929,10 +950,14 @@ Frases más representativas:
                                 "Frase representativa": frase_rep
                             })
                     ws5 = writer.book.create_sheet("Grupos por componente")
-                    ws5.append(["Componente", "Grupo", "Frecuencia", "Frase representativa", "Nota fórmula"])
+                    ws5.append(["Componente", "Grupo", "Frecuencia", "Frase representativa", "Fórmula Excel"])
                     for g in grupos_export:
-                        nota = f"COUNTIFS col {col_comp}=Componente Y col {col_grupo}=Grupo"
-                        ws5.append([g["Componente"], g["Grupo"], g["Frecuencia"], g["Frase representativa"], nota])
+                        rn = ws5.max_row + 1
+                        f_grupo = (
+                            f"=COUNTIFS({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},"
+                            f"{dc}!${col_grupo}$2:${col_grupo}${n_filas},B{rn})"
+                        )
+                        ws5.append([g["Componente"], g["Grupo"], f_grupo, g["Frase representativa"], f"COUNTIFS col {col_comp}=A y col {col_grupo}=B"])
 
                     # ── HOJA 6: COHESIÓN SEMÁNTICA ──
                     ws6 = writer.book.create_sheet("Cohesion semantica")
