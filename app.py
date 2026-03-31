@@ -908,9 +908,7 @@ Frases más representativas:
                             rn = i + 3
                             # Formula: cuenta cuántas veces aparece el nombre de la línea en la columna lineas_inversion
                             f_linea = (
-                                f"=SUMPRODUCT((LEN({dc}!${col_li}$2:${col_li}${n_filas})"
-                            f'-LEN(SUBSTITUTE({dc}!${col_li}$2:${col_li}${n_filas},A{rn},"")))'
-                            f"/LEN(A{rn}))"
+                                f"=SUMPRODUCT(ISNUMBER(SEARCH(A{rn},{dc}!${col_li}$2:${col_li}${n_filas}))*1)"
                             )
                             ws3.append([linea, f_linea, f"SUMPRODUCT+SUSTITUIR en columna {col_li} de Datos completos"])
 
