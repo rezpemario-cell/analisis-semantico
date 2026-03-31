@@ -852,16 +852,35 @@ Frases más representativas:
                 buffer_cart = io.BytesIO()
                 with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:
 
-                    # Hoja 1 — Datos completos
+                    # ── HOJA 1: DATOS COMPLETOS ──
+                    from openpyxl.utils import get_column_letter
                     cols_meta_export = [c for c in ["municipio", "vereda", "año", "semestre"] if c in df_filtrado.columns]
                     cols_descarga = cols_meta_export + ["componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
                     cols_disponibles = [c for c in cols_descarga if c in df_filtrado.columns]
-                    df_filtrado[cols_disponibles].to_excel(writer, sheet_name="Datos completos", index=False)
-                    
-                    # Hoja 2 — Distribución por componente
-                    conteo_comp.to_excel(writer, sheet_name="Distribucion componentes", index=False)
+                    df_export = df_filtrado[cols_disponibles].reset_index(drop=True)
+                    df_export.to_excel(writer, sheet_name="Datos completos", index=False)
 
-                    # Hoja 3 — Líneas de inversión (misma normalización que la app)
+                    # Calcular columnas clave en Datos completos
+                    col_idx = {col: get_column_letter(i+1) for i, col in enumerate(cols_disponibles)}
+                    col_comp = col_idx.get("componente", "E")
+                    col_grupo = col_idx.get("grupo", "G")
+                    col_peso = col_idx.get("peso_semantico", "H")
+                    col_li = col_idx.get("lineas_inversion", "I")
+                    n_filas = len(df_export) + 1
+                    dc = "'Datos completos'"
+
+                    # ── HOJA 2: DISTRIBUCIÓN POR COMPONENTE ──
+                    componentes_unicos = sorted(df_export["componente"].dropna().unique())
+                    ws2 = writer.book.create_sheet("Distribucion componentes")
+                    ws2.append(["Componente", "Frases", "Porcentaje (%)", "Nota fórmula"])
+                    for i, comp in enumerate(componentes_unicos):
+                        rn = i + 2
+                        f_count = f"=COUNTIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn})"
+                        f_pct = f"=B{rn}/SUM($B$2:$B${len(componentes_unicos)+1})*100"
+                        nota = f"COUNTIF columna {col_comp} de Datos completos"
+                        ws2.append([comp, f_count, f_pct, nota])
+
+                    # ── HOJA 3: LÍNEAS DE INVERSIÓN ──
                     lineas_export = []
                     for lineas_str in df_filtrado["lineas_inversion"]:
                         for l in str(lineas_str).split(","):
@@ -870,12 +889,16 @@ Frases más representativas:
                             if normalizada:
                                 lineas_export.append(normalizada)
                     if lineas_export:
-                        df_lineas_exp = pd.DataFrame({"linea": lineas_export})
-                        conteo_lineas_exp = df_lineas_exp["linea"].value_counts().reset_index()
-                        conteo_lineas_exp.columns = ["Línea de inversión", "Frecuencia"]
-                        conteo_lineas_exp.to_excel(writer, sheet_name="Lineas de inversion", index=False)
+                        lineas_unicas = sorted(set(lineas_export))
+                        ws3 = writer.book.create_sheet("Lineas de inversion")
+                        ws3.append(["Línea de inversión", "Frecuencia", "Nota"])
+                        ws3.append(["NOTA", "Una frase puede tener varias líneas — se cuenta cada aparición", ""])
+                        for linea in lineas_unicas:
+                            frecuencia = lineas_export.count(linea)
+                            nota = f"Conteo de apariciones de esta línea en columna {col_li}"
+                            ws3.append([linea, frecuencia, nota])
 
-                    # Hoja 4 — Cruce componente x línea (misma normalización que la app)
+                    # ── HOJA 4: CRUCE COMPONENTE x LÍNEA ──
                     cruce_export = []
                     for _, row in df_filtrado.iterrows():
                         for l in str(row["lineas_inversion"]).split(","):
@@ -886,9 +909,13 @@ Frases más representativas:
                     if cruce_export:
                         df_cruce_exp = pd.DataFrame(cruce_export)
                         pivot_exp = df_cruce_exp.groupby(["Componente", "Línea"]).size().reset_index(name="Cantidad")
-                        pivot_exp.to_excel(writer, sheet_name="Cruce componente x linea", index=False)
+                        ws4 = writer.book.create_sheet("Cruce componente x linea")
+                        ws4.append(["Componente", "Línea", "Cantidad", "Nota fórmula"])
+                        for _, row in pivot_exp.iterrows():
+                            nota = f"COUNTIFS col {col_comp}=Componente Y col {col_li} contiene Línea"
+                            ws4.append([row["Componente"], row["Línea"], row["Cantidad"], nota])
 
-                    # Hoja 5 — Grupos por componente
+                    # ── HOJA 5: GRUPOS POR COMPONENTE ──
                     grupos_export = []
                     for comp in comp_filtro:
                         subset_comp = df_filtrado[df_filtrado["componente"] == comp]
@@ -901,13 +928,34 @@ Frases más representativas:
                                 "Frecuencia": len(subset_grupo),
                                 "Frase representativa": frase_rep
                             })
-                    pd.DataFrame(grupos_export).to_excel(writer, sheet_name="Grupos por componente", index=False)
+                    ws5 = writer.book.create_sheet("Grupos por componente")
+                    ws5.append(["Componente", "Grupo", "Frecuencia", "Frase representativa", "Nota fórmula"])
+                    for g in grupos_export:
+                        nota = f"COUNTIFS col {col_comp}=Componente Y col {col_grupo}=Grupo"
+                        ws5.append([g["Componente"], g["Grupo"], g["Frecuencia"], g["Frase representativa"], nota])
 
-                    # Hoja 6 — Cohesión semántica
-                    pesos_c.to_excel(writer, sheet_name="Cohesion semantica", index=False)
+                    # ── HOJA 6: COHESIÓN SEMÁNTICA ──
+                    ws6 = writer.book.create_sheet("Cohesion semantica")
+                    ws6.append(["Componente", "Cohesión promedio", "Fórmula Excel equivalente"])
+                    for i, comp in enumerate(componentes_unicos):
+                        rn = i + 2
+                        f_avg = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
+                        cohesion = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
+                        ws6.append([comp, cohesion, f_avg])
 
-                    # Hoja 7 — Resumen ejecutivo
-                    resumen_exec.to_excel(writer, sheet_name="Resumen ejecutivo", index=False)
+                    # ── HOJA 7: RESUMEN EJECUTIVO ──
+                    ws7 = writer.book.create_sheet("Resumen ejecutivo")
+                    ws7.append(["Componente", "Total frases", "Cohesión semántica", "Porcentaje (%)", "Fórmula frases", "Fórmula cohesión"])
+                    n_comp = len(componentes_unicos)
+                    for i, comp in enumerate(componentes_unicos):
+                        rn = i + 2
+                        f_frases = f"=COUNTIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn})"
+                        f_cohesion = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
+                        f_pct = f"=B{rn}/SUM($B$2:$B${n_comp+1})*100"
+                        total = len(df_filtrado[df_filtrado["componente"] == comp])
+                        coh = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
+                        pct = round(total / len(df_filtrado) * 100, 1)
+                        ws7.append([comp, f_frases, f_cohesion, f_pct, f"COUNTIF col {col_comp}", f"AVERAGEIF col {col_peso}"])
 
                    # Hoja 8 — Frases representativas
                     frases_rep_export = []
