@@ -963,7 +963,7 @@ Frases más representativas:
                     for i, comp in enumerate(componentes_unicos):
                         rn = i + 2
                         f_avg = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
-                        cohesion = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
+                        cohesion = round(float(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean()), 3)
                         ws6.append([comp, cohesion, f_avg])
 
                     # ── HOJA 7: RESUMEN EJECUTIVO ──
@@ -976,7 +976,7 @@ Frases más representativas:
                         f_cohesion = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
                         f_pct = f"=B{rn}/SUM($B$2:$B${n_comp+1})*100"
                         total = len(df_filtrado[df_filtrado["componente"] == comp])
-                        coh = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
+                        coh = round(float(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean()), 3)
                         pct = round(total / len(df_filtrado) * 100, 1)
                         ws7.append([comp, f_frases, f_cohesion, f_pct, f"COUNTIF col {col_comp}", f"AVERAGEIF col {col_peso}"])
 
