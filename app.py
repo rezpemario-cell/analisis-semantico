@@ -27,6 +27,58 @@ st.title("🔍 Análisis Semántico de Encuestas y Cartografía Social")
 
 client = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
 
+GITHUB_USER = "rezpemario-cell"
+GITHUB_REPO = "analisis-semantico"
+GITHUB_BRANCH = "main"
+
+def cargar_resultado_github(archivo_hash):
+    """Carga resultado guardado en GitHub si existe."""
+    import requests, base64, json
+    try:
+        token = st.secrets.get("GITHUB_TOKEN", "")
+        if not token:
+            return None
+        filename = f"cache_{archivo_hash}.csv"
+        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/cache/{filename}"
+        headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            content_b64 = data["content"]
+            csv_content = base64.b64decode(content_b64).decode("utf-8")
+            df = pd.read_csv(io.StringIO(csv_content))
+            return df
+        return None
+    except:
+        return None
+
+def guardar_resultado_github(df_result, archivo_hash):
+    """Guarda resultado en GitHub para persistencia."""
+    import requests, base64, json
+    try:
+        token = st.secrets.get("GITHUB_TOKEN", "")
+        if not token:
+            return False
+        filename = f"cache_{archivo_hash}.csv"
+        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/cache/{filename}"
+        headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        csv_content = df_result.to_csv(index=False)
+        content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
+        # Check if file exists to get SHA
+        resp_get = requests.get(url, headers=headers, timeout=10)
+        payload = {
+            "message": f"Cache análisis {archivo_hash[:8]}",
+            "content": content_b64,
+            "branch": GITHUB_BRANCH
+        }
+        if resp_get.status_code == 200:
+            payload["sha"] = resp_get.json()["sha"]
+        resp_put = requests.put(url, headers=headers, json=payload, timeout=15)
+        return resp_put.status_code in [200, 201]
+    except:
+        return False
+
+
 @st.cache_resource
 def cargar_modelo():
     return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
@@ -404,7 +456,17 @@ elif modo == "🗺️ Cartografía Social":
                 st.session_state.get("cache_key_saved") == cache_key and
                 st.session_state.get("cache_result_cart") is not None
             )
-            if usar_cache:
+            if not usar_cache:
+                # Intentar cargar desde GitHub
+                with st.spinner("Buscando análisis previo guardado..."):
+                    df_github = cargar_resultado_github(archivo_hash)
+                if df_github is not None:
+                    st.info("✅ Análisis previo encontrado — cargando resultados guardados.")
+                    df_result = df_github
+                    st.session_state.cache_result_cart = df_result
+                    st.session_state.cache_key_saved = cache_key
+                    usar_cache = True
+            if usar_cache and st.session_state.get("cache_result_cart") is not None:
                 st.info("✅ Mismos datos detectados — usando resultados anteriores.")
                 df_result = st.session_state.cache_result_cart
                 total_participantes = pd.to_numeric(df.get("participantes", pd.Series([0])), errors="coerce").sum() if "participantes" in df.columns else 0
@@ -598,6 +660,12 @@ elif modo == "🗺️ Cartografía Social":
 
                 st.session_state.cache_result_cart = df_result
                 st.session_state.cache_key_saved = cache_key
+                with st.spinner("Guardando análisis en GitHub para uso futuro..."):
+                    guardado = guardar_resultado_github(df_result, archivo_hash)
+                if guardado:
+                    st.success("✅ Análisis guardado — próximas cargas serán instantáneas.")
+                else:
+                    st.warning("⚠️ No se pudo guardar en GitHub — se usará caché local.")
                 st.success("Análisis completado.")            
             st.session_state.resultados_cart = df_result
 
@@ -908,7 +976,9 @@ Frases más representativas:
                             rn = i + 3
                             # Formula: cuenta cuántas veces aparece el nombre de la línea en la columna lineas_inversion
                             f_linea = (
-                                f"=SUMPRODUCT(ISNUMBER(SEARCH(A{rn},{dc}!${col_li}$2:${col_li}${n_filas}))*1)"
+                                f"=SUMPRODUCT((LEN({dc}!${col_li}$2:${col_li}${n_filas})"
+                                f'-LEN(SUSTITUIR({dc}!${col_li}$2:${col_li}${n_filas},A{rn},"")))'
+                                f"/LEN(A{rn}))"
                             )
                             ws3.append([linea, f_linea, f"SUMPRODUCT+SUSTITUIR en columna {col_li} de Datos completos"])
 
@@ -963,7 +1033,7 @@ Frases más representativas:
                     for i, comp in enumerate(componentes_unicos):
                         rn = i + 2
                         f_avg = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
-                        cohesion = round(float(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean()), 3)
+                        cohesion = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
                         ws6.append([comp, cohesion, f_avg])
 
                     # ── HOJA 7: RESUMEN EJECUTIVO ──
@@ -976,7 +1046,7 @@ Frases más representativas:
                         f_cohesion = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
                         f_pct = f"=B{rn}/SUM($B$2:$B${n_comp+1})*100"
                         total = len(df_filtrado[df_filtrado["componente"] == comp])
-                        coh = round(float(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean()), 3)
+                        coh = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
                         pct = round(total / len(df_filtrado) * 100, 1)
                         ws7.append([comp, f_frases, f_cohesion, f_pct, f"COUNTIF col {col_comp}", f"AVERAGEIF col {col_peso}"])
 
