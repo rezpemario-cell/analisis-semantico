@@ -423,7 +423,8 @@ elif modo == "🗺️ Cartografía Social":
     archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
 
     if archivo:
-        archivo_hash = str(hash(archivo.read()))
+        import hashlib
+        archivo_hash = hashlib.md5(archivo.read()).hexdigest()
         archivo.seek(0)
         df = pd.read_excel(archivo)
         df.columns = [c.strip().lower() for c in df.columns]
