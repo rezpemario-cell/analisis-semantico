@@ -264,6 +264,43 @@ def normalizar_linea(texto):
             return linea
     return None
 
+
+def texto_a_likert(valor, escala_max):
+    """
+    Convierte respuestas Likert de texto o número a float.
+    Funciona con escalas 1-3 y 1-5. Retorna np.nan si no reconoce el valor.
+    """
+    if pd.isna(valor):
+        return np.nan
+    try:
+        n = float(str(valor).strip().replace(",", "."))
+        return n if 1 <= n <= escala_max else np.nan
+    except (ValueError, TypeError):
+        pass
+    mapa3 = {
+        "de acuerdo": 3, "sí": 3, "si": 3, "siempre": 3, "totalmente": 3,
+        "muy de acuerdo": 3, "completamente de acuerdo": 3, "excelente": 3,
+        "completamente": 3, "totalmente de acuerdo": 3,
+        "neutral": 2, "a veces": 2, "parcialmente": 2, "regular": 2,
+        "más o menos": 2, "más o menos de acuerdo": 2,
+        "en desacuerdo": 1, "no": 1, "nunca": 1, "deficiente": 1,
+        "muy en desacuerdo": 1, "totalmente en desacuerdo": 1,
+        "completamente en desacuerdo": 1,
+    }
+    mapa5 = {
+        "muy de acuerdo": 5, "totalmente de acuerdo": 5, "excelente": 5,
+        "completamente de acuerdo": 5, "siempre": 5,
+        "de acuerdo": 4, "bien": 4, "bastante": 4, "casi siempre": 4,
+        "neutral": 3, "ni de acuerdo ni en desacuerdo": 3, "regular": 3,
+        "a veces": 3,
+        "en desacuerdo": 2, "poco": 2, "deficiente": 2, "casi nunca": 2,
+        "muy en desacuerdo": 1, "totalmente en desacuerdo": 1,
+        "pésimo": 1, "nunca": 1, "completamente en desacuerdo": 1,
+    }
+    mapa = mapa5 if escala_max == 5 else mapa3
+    return mapa.get(str(valor).strip().lower(), np.nan)
+
+
 def clasificar_texto_enc(texto):
     texto_lower = str(texto).lower()
     temas = []
@@ -1229,14 +1266,18 @@ if modo == "📋 Encuesta":
                                 st.info(f"ℹ️ **Aliados:** {n_pers} personas únicas, "
                                         f"{len(df_v)} evaluaciones (col: '{posibles_id[0]}')")
                         if proy_lista and pdet:
-                            det_s = set(str(k).strip() for k in pdet)
-                            esp_s = set(proy_lista)
-                            if det_s - esp_s:
-                                st.warning(f"**{gr_v}** — En datos pero no en lista: "
-                                           f"{', '.join(det_s - esp_s)}")
-                            if esp_s - det_s:
-                                st.warning(f"**{gr_v}** — En lista pero sin datos: "
-                                           f"{', '.join(esp_s - det_s)}")
+                            det_s_lower = set(str(k).strip().lower() for k in pdet)
+                            esp_s_lower = set(p.strip().lower() for p in proy_lista)
+                            det_orig = {str(k).strip().lower(): str(k).strip() for k in pdet}
+                            esp_orig = {p.strip().lower(): p.strip() for p in proy_lista}
+                            solo_datos = det_s_lower - esp_s_lower
+                            solo_lista = esp_s_lower - det_s_lower
+                            if solo_datos:
+                                st.warning(f"**{gr_v}** — En datos pero NO en tu lista. "
+                                           f"Copia exactamente: {', '.join(det_orig[k] for k in solo_datos)}")
+                            if solo_lista:
+                                st.warning(f"**{gr_v}** — En tu lista pero SIN datos. "
+                                           f"Revisa mayúsculas/tildes: {', '.join(esp_orig[k] for k in solo_lista)}")
                         if pdet:
                             st.write(f"**{gr_v} — Proyectos detectados:**")
                             st.dataframe(pd.DataFrame(list(pdet.items()),
@@ -1285,7 +1326,7 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        raw = df_g[df_g[col_proy].astype(str).str.strip()==proy][cl]
+                                        raw = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cl]
                                     else:
                                         raw = df_g[cl]
                                     sub = raw.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
@@ -1328,7 +1369,7 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        raw_hm = df_g[df_g[col_proy].astype(str).str.strip()==proy][cl]
+                                        raw_hm = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cl]
                                     else:
                                         raw_hm = df_g[cl]
                                     sub_hm = raw_hm.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
@@ -1357,7 +1398,7 @@ if modo == "📋 Encuesta":
                                     if cs not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        sub_sn = df_g[df_g[col_proy].astype(str).str.strip()==proy][cs].dropna()
+                                        sub_sn = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cs].dropna()
                                     else:
                                         sub_sn = df_g[cs].dropna()
                                     if len(sub_sn)>0:
@@ -1379,7 +1420,7 @@ if modo == "📋 Encuesta":
                                     continue
                                 if col_proy and col_proy in df_g.columns:
                                     sub_cal = pd.to_numeric(
-                                        df_g[df_g[col_proy].astype(str).str.strip()==proy][col_cal],
+                                        df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][col_cal],
                                         errors="coerce").dropna()
                                 else:
                                     sub_cal = pd.to_numeric(df_g[col_cal],errors="coerce").dropna()
@@ -1401,7 +1442,7 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        raw_t = df_g[df_g[col_proy].astype(str).str.strip()==proy][cl]
+                                        raw_t = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cl]
                                     else:
                                         raw_t = df_g[cl]
                                     sub_t = raw_t.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
