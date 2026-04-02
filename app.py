@@ -678,8 +678,9 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
 
         temas_lista = list(KEYWORDS_TEMAS.keys()) + ["Sin clasificar"]
         temas_str = ",".join(temas_lista)
+        # El rango E2:E5000 cubre hasta 5000 respuestas — evita el error de Excel
         dv_temas = DataValidation(type="list", formula1=f'"{temas_str}"',
-                                  showErrorMessage=False)
+                                  showErrorMessage=False, sqref="E2:E5000")
         ws_ab.add_data_validation(dv_temas)
 
         ri_ab = 2
@@ -706,7 +707,7 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
                         ws_ab.cell(ri_ab, 5).value = tema_sug
                         ws_ab.cell(ri_ab, 4).alignment = Alignment(wrap_text=True,
                                                                     vertical="top")
-                        dv_temas.add(f"E{ri_ab}")
+                        # (validación asignada por rango en sqref, no por celda)
                         # Color Sin clasificar
                         if tema_sug == "Sin clasificar":
                             ws_ab.cell(ri_ab, 5).fill = PatternFill(
@@ -1284,11 +1285,10 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        sub = pd.to_numeric(
-                                            df_g[df_g[col_proy].astype(str).str.strip()==proy][cl],
-                                            errors="coerce").dropna()
+                                        raw = df_g[df_g[col_proy].astype(str).str.strip()==proy][cl]
                                     else:
-                                        sub = pd.to_numeric(df_g[cl],errors="coerce").dropna()
+                                        raw = df_g[cl]
+                                    sub = raw.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
                                     if len(sub) > 0:
                                         av  = " ⚠️indiv." if len(sub)<=2 else ""
                                         fila_c[f"{cl} | {gr} (n={len(sub)}{av})"] = semaforo_likert(sub.mean(),esc_max)
@@ -1296,8 +1296,27 @@ if modo == "📋 Encuesta":
                             filas_consolidado.append(fila_c)
                             filas_acuerdo.append(fila_ac)
 
-                        st.caption("🟢 Destacado | 🟡 Aceptable | 🔴 Crítico | ⚠️indiv. = n≤2")
+                        st.caption("🟢 Destacado | 🟡 Aceptable | 🔴 Crítico | ⚠️indiv. = n≤2 | ⬜ Sin dato o sin respuesta numérica")
+
+                        # Vista de semáforos
                         st.dataframe(pd.DataFrame(filas_consolidado), use_container_width=True)
+
+                        # Vista numérica con colores de fondo (más fácil de leer)
+                        st.write("**Vista numérica** (colores automáticos — verde=bueno, rojo=bajo):")
+                        df_num_lk = pd.DataFrame(filas_consolidado).copy()
+                        df_num_lk = df_num_lk.set_index("Proyecto")
+                        def extraer_num_lk(val):
+                            try:
+                                return float(str(val).replace("🟢","").replace("🟡","").replace("🔴","").replace("⬜ Sin dato","").strip())
+                            except:
+                                return np.nan
+                        df_num_lk = df_num_lk.applymap(extraer_num_lk)
+                        st.dataframe(
+                            df_num_lk.style.background_gradient(
+                                cmap="RdYlGn", vmin=1, vmax=esc_max, axis=None
+                            ).format("{:.2f}", na_rep="—"),
+                            use_container_width=True)
+
                         st.write("**% de acuerdo** (respuestas con valor máximo):")
                         st.dataframe(pd.DataFrame(filas_acuerdo), use_container_width=True)
 
@@ -1309,11 +1328,10 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        sub_hm = pd.to_numeric(
-                                            df_g[df_g[col_proy].astype(str).str.strip()==proy][cl],
-                                            errors="coerce").dropna()
+                                        raw_hm = df_g[df_g[col_proy].astype(str).str.strip()==proy][cl]
                                     else:
-                                        sub_hm = pd.to_numeric(df_g[cl],errors="coerce").dropna()
+                                        raw_hm = df_g[cl]
+                                    sub_hm = raw_hm.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
                                     if len(sub_hm)>0:
                                         filas_hm.append({
                                             "Proyecto": str(proy)[:35],
@@ -1383,11 +1401,10 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        sub_t = pd.to_numeric(
-                                            df_g[df_g[col_proy].astype(str).str.strip()==proy][cl],
-                                            errors="coerce").dropna()
+                                        raw_t = df_g[df_g[col_proy].astype(str).str.strip()==proy][cl]
                                     else:
-                                        sub_t = pd.to_numeric(df_g[cl],errors="coerce").dropna()
+                                        raw_t = df_g[cl]
+                                    sub_t = raw_t.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
                                     if len(sub_t)>0:
                                         vals_t[gr] = round(sub_t.mean(),2)
                                 if len(vals_t)>=2:
