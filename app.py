@@ -2,16 +2,17 @@ import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 import io
+import hashlib
+import json
+import base64
+import requests
 import streamlit as st
+
 # ── INICIALIZAR SESSION STATE ─────────────────────────────────────
-if "resultados_cart" not in st.session_state:
-    st.session_state.resultados_cart = None
-if "informe_cart" not in st.session_state:
-    st.session_state.informe_cart = None
-if "resultados_enc" not in st.session_state:
-    st.session_state.resultados_enc = None
-if "informe_enc" not in st.session_state:
-    st.session_state.informe_enc = None
+for _k in ["resultados_cart","informe_cart","resultados_enc","informe_enc"]:
+    if _k not in st.session_state:
+        st.session_state[_k] = None
+
 import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -22,62 +23,17 @@ import plotly.express as px
 from umap import UMAP
 from mistralai import Mistral
 
+# openpyxl para Excel con fórmulas
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.formatting.rule import FormulaRule
+from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.utils import get_column_letter
+
 st.set_page_config(page_title="Análisis Semántico", layout="wide")
 st.title("🔍 Análisis Semántico de Encuestas y Cartografía Social")
 
 client = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
-
-GITHUB_USER = "rezpemario-cell"
-GITHUB_REPO = "analisis-semantico"
-GITHUB_BRANCH = "main"
-
-def cargar_resultado_github(archivo_hash):
-    """Carga resultado guardado en GitHub si existe."""
-    import requests, base64, json
-    try:
-        token = st.secrets.get("GITHUB_TOKEN", "")
-        if not token:
-            return None
-        filename = f"cache_{archivo_hash}.csv"
-        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/cache/{filename}"
-        headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            content_b64 = data["content"]
-            csv_content = base64.b64decode(content_b64).decode("utf-8")
-            df = pd.read_csv(io.StringIO(csv_content))
-            return df
-        return None
-    except:
-        return None
-
-def guardar_resultado_github(df_result, archivo_hash):
-    """Guarda resultado en GitHub para persistencia."""
-    import requests, base64, json
-    try:
-        token = st.secrets.get("GITHUB_TOKEN", "")
-        if not token:
-            return False
-        filename = f"cache_{archivo_hash}.csv"
-        url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/cache/{filename}"
-        headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
-        csv_content = df_result.to_csv(index=False)
-        content_b64 = base64.b64encode(csv_content.encode("utf-8")).decode("utf-8")
-        # Check if file exists to get SHA
-        resp_get = requests.get(url, headers=headers, timeout=10)
-        payload = {
-            "message": f"Cache análisis {archivo_hash[:8]}",
-            "content": content_b64,
-            "branch": GITHUB_BRANCH
-        }
-        if resp_get.status_code == 200:
-            payload["sha"] = resp_get.json()["sha"]
-        resp_put = requests.put(url, headers=headers, json=payload, timeout=15)
-        return resp_put.status_code in [200, 201]
-    except:
-        return False
-
 
 @st.cache_resource
 def cargar_modelo():
@@ -85,6 +41,128 @@ def cargar_modelo():
 
 modelo = cargar_modelo()
 
+# ════════════════════════════════════════════════════════════════
+# SISTEMA DE CACHÉ — GITHUB PERSISTENCIA
+# ════════════════════════════════════════════════════════════════
+GITHUB_REPO  = "rezpemario-cell/analisis-semantico"
+CACHE_FOLDER = "cache"
+
+def md5_archivo(archivo):
+    """Calcula hash MD5 del contenido del archivo. Siempre igual para el mismo archivo."""
+    archivo.seek(0)
+    contenido = archivo.read()
+    archivo.seek(0)
+    return hashlib.md5(contenido).hexdigest()
+
+def leer_cache_github(hash_md5):
+    """Busca cache/{hash_md5}.json en GitHub. Retorna dict o None."""
+    try:
+        token = st.secrets.get("GITHUB_TOKEN", "")
+        if not token:
+            return None
+        url = (f"https://api.github.com/repos/{GITHUB_REPO}"
+               f"/contents/{CACHE_FOLDER}/{hash_md5}.json")
+        headers = {"Authorization": f"token {token}",
+                   "Accept": "application/vnd.github.v3+json"}
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            contenido_b64 = r.json()["content"]
+            contenido = base64.b64decode(contenido_b64).decode("utf-8")
+            return json.loads(contenido)
+    except Exception:
+        pass
+    return None
+
+def escribir_cache_github(hash_md5, datos):
+    """Guarda datos como JSON en GitHub. Actualiza si ya existe. Retorna True/False."""
+    try:
+        token = st.secrets.get("GITHUB_TOKEN", "")
+        if not token:
+            return False
+        url = (f"https://api.github.com/repos/{GITHUB_REPO}"
+               f"/contents/{CACHE_FOLDER}/{hash_md5}.json")
+        headers = {"Authorization": f"token {token}",
+                   "Accept": "application/vnd.github.v3+json"}
+        contenido_str = json.dumps(datos, ensure_ascii=False, default=str)
+        contenido_b64 = base64.b64encode(contenido_str.encode("utf-8")).decode("utf-8")
+        r_get = requests.get(url, headers=headers, timeout=10)
+        payload = {"message": f"cache: {hash_md5[:8]}", "content": contenido_b64}
+        if r_get.status_code == 200:
+            payload["sha"] = r_get.json()["sha"]
+        r_put = requests.put(url, headers=headers, json=payload, timeout=15)
+        return r_put.status_code in [200, 201]
+    except Exception:
+        return False
+
+def df_a_cache(df):
+    """Convierte DataFrame a lista de dicts JSON-serializable."""
+    records = []
+    for _, row in df.iterrows():
+        rec = {}
+        for col in df.columns:
+            val = row[col]
+            if isinstance(val, list):
+                rec[col] = val
+            elif not isinstance(val, (list, dict)) and pd.isna(val):
+                rec[col] = None
+            else:
+                rec[col] = val
+        records.append(rec)
+    return records
+
+def cache_a_df(records):
+    """Reconstruye DataFrame desde lista de dicts."""
+    return pd.DataFrame(records)
+
+# ════════════════════════════════════════════════════════════════
+# DICCIONARIO DE TEMAS (módulo global)
+# ════════════════════════════════════════════════════════════════
+KEYWORDS_TEMAS = {
+    'Agua y medio ambiente': ['agua','acueducto','hídrico','fuentes','nacimiento',
+                              'reforestar','árbol','medio ambiente','ambiental',
+                              'cuenca','microcuenca','monitoreo','conservación',
+                              'reforestación','siembra','sembrar','sequía'],
+    'Liderazgo y organización': ['liderazgo','líder','jac','junta',
+                                 'organización','participación','capacitar',
+                                 'fortalecer','fortalecimiento','vocería',
+                                 'empoderamiento','gestión'],
+    'Mujer y género': ['mujer','mujeres','femenino','género','ama de casa','voceras'],
+    'Educación y formación': ['educación','formación','capacitación','aprendizaje',
+                              'estudiante','jóvenes','universidad','técnica','sena',
+                              'conocimiento','habilidades'],
+    'Infraestructura': ['vía','vias','camino','caseta','placa','huella',
+                        'construcción','obra','cancha','tanque','sede'],
+    'Agricultura y economía rural': ['café','caficultura','agricultura','campo',
+                                     'emprendimiento','productivo','producción',
+                                     'semilla','cosecha','finca'],
+    'Continuidad y sostenibilidad': ['continuar','continúe','seguir','siga',
+                                     'sostenible','sostenibilidad','durar','mantenerse'],
+    'Comunicación e información': ['comunicación','información','transparencia',
+                                   'redes sociales','difusión','visibilizar','informar'],
+    'Mejora y sugerencias': ['mejorar','mejora','sugerencia','falta','necesita',
+                             'cumplir','cumplimiento','prometieron','convocatoria'],
+    'Percepción positiva empresa': ['empresa','confianza','apoyo','acompañamiento',
+                                    'agradecimiento','colaboración','beneficio'],
+    'Riesgo y preocupación cierre': ['triste','abandono','finalizar','cierre',
+                                     'solos','sin apoyo','dejar','retiro','desamparados'],
+    'Alianzas institucionales': ['alianza','municipio','alcaldía','gobernación',
+                                 'articulación','público-privada','entidad'],
+    'Minería': ['minería','minero','mina','formalización','exploración'],
+    'Nuevos proyectos propuestos': ['turismo','turístico','aves','fauna','flora',
+                                    'tiempo libre','ludico','pollos','horticultura'],
+}
+
+LINEAS_CANONICAS = [
+    "Agua y territorio",
+    "Desarrollo rural",
+    "Educación y competitividad",
+    "Infraestructura comunitaria",
+    "Fortalecimiento comunitario"
+]
+
+# ════════════════════════════════════════════════════════════════
+# FUNCIONES AUXILIARES GENERALES
+# ════════════════════════════════════════════════════════════════
 def encontrar_clusters_optimos(vectores, min_k=2, max_k=8):
     max_k = min(max_k, len(vectores) - 1)
     if max_k < 2:
@@ -100,96 +178,54 @@ def etiquetar_grupos_ia(frases_por_grupo, contexto):
     etiquetas = {}
     for grupo, frases in frases_por_grupo.items():
         muestra = "\n".join(f"- {f}" for f in frases[:5])
-        prompt = f"""Eres un experto en análisis social y organizacional.
-Analiza estas frases de un grupo semántico en el contexto de {contexto}:
-{muestra}
-Genera UN título descriptivo de máximo 6 palabras que capture el tema central.
-Responde SOLO con el título, sin explicaciones."""
+        prompt = (f"Eres un experto en análisis social y organizacional.\n"
+                  f"Analiza estas frases de un grupo semántico en el contexto de {contexto}:\n{muestra}\n"
+                  f"Genera UN título descriptivo de máximo 6 palabras que capture el tema central.\n"
+                  f"Responde SOLO con el título, sin explicaciones.")
         try:
-            resp = client.chat.complete(
-                model="mistral-small-latest",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=20
-            )
+            resp = client.chat.complete(model="mistral-small-latest",
+                                        messages=[{"role":"user","content":prompt}],
+                                        max_tokens=20)
             etiquetas[grupo] = resp.choices[0].message.content.strip()
         except:
             etiquetas[grupo] = f"Grupo {grupo + 1}"
     return etiquetas
 
-def asociar_lineas_inversion(frase, lineas, contexto):
-    lineas_str = "\n".join(f"- {l}" for l in lineas)
-    prompt = f"""Eres un experto en planificación territorial y desarrollo comunitario.
-Analiza esta frase del contexto de {contexto}:
-"{frase}"
-
-Líneas de inversión disponibles:
-{lineas_str}
-
-¿A cuáles líneas de inversión corresponde esta frase? Puede ser una o varias.
-Responde SOLO con los nombres exactos de las líneas separados por coma, sin explicaciones."""
-    try:
-        resp = client.chat.complete(
-            model="mistral-small-latest",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100
-        )
-        return resp.choices[0].message.content.strip()
-    except:
-        return "No determinado"
-
 def categorizar_hallazgos(frases, contexto):
     texto = "\n".join(f"- {f}" for f in frases[:30])
-    prompt = f"""Eres un experto en diagnóstico social y organizacional.
-Analiza estas frases del contexto de {contexto}:
-{texto}
-
-Clasifica los hallazgos en:
-- PROBLEMAS: situaciones negativas
-- POTENCIALIDADES: recursos o aspectos positivos
-- PROPUESTAS: sugerencias planteadas por participantes
-- ALERTAS: situaciones urgentes
-
-Formato exacto:
-PROBLEMAS:
-- [hallazgo]
-POTENCIALIDADES:
-- [hallazgo]
-PROPUESTAS:
-- [hallazgo]
-ALERTAS:
-- [hallazgo]
-
-Máximo 3 puntos por categoría. Si no hay, escribe "No identificados"."""
+    prompt = (f"Eres un experto en diagnóstico social y organizacional.\n"
+              f"Analiza estas frases del contexto de {contexto}:\n{texto}\n\n"
+              f"Clasifica los hallazgos en:\n"
+              f"- PROBLEMAS: situaciones negativas\n"
+              f"- POTENCIALIDADES: recursos o aspectos positivos\n"
+              f"- PROPUESTAS: sugerencias planteadas por participantes\n"
+              f"- ALERTAS: situaciones urgentes\n\n"
+              f"Formato exacto:\nPROBLEMAS:\n- [hallazgo]\nPOTENCIALIDADES:\n- [hallazgo]\n"
+              f"PROPUESTAS:\n- [hallazgo]\nALERTAS:\n- [hallazgo]\n\n"
+              f"Máximo 3 puntos por categoría. Si no hay, escribe 'No identificados'.")
     try:
-        resp = client.chat.complete(
-            model="mistral-small-latest",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=500
-        )
+        resp = client.chat.complete(model="mistral-small-latest",
+                                    messages=[{"role":"user","content":prompt}],
+                                    max_tokens=500)
         return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {e}"
 
 def generar_informe_ia(resumen_datos, contexto):
-    prompt = f"""Eres un consultor experto en {contexto}.
-Basándote en este resumen de análisis semántico participativo:
-{resumen_datos}
-
-Genera un informe ejecutivo profesional con:
-1. DIAGNÓSTICO GENERAL (2-3 párrafos)
-2. HALLAZGOS PRINCIPALES (máximo 5, por relevancia)
-3. RECOMENDACIONES ESTRATÉGICAS (máximo 5, priorizadas)
-4. ACCIONES INMEDIATAS (máximo 3 para los próximos 30 días)
-5. ALERTAS (atención urgente)
-6. NOTA SOBRE SUBREGISTRO
-
-Lenguaje profesional, directo y orientado a toma de decisiones."""
+    prompt = (f"Eres un consultor experto en {contexto}.\n"
+              f"Basándote en este resumen de análisis semántico participativo:\n{resumen_datos}\n\n"
+              f"Genera un informe ejecutivo profesional con:\n"
+              f"1. DIAGNÓSTICO GENERAL (2-3 párrafos)\n"
+              f"2. HALLAZGOS PRINCIPALES (máximo 5, por relevancia)\n"
+              f"3. RECOMENDACIONES ESTRATÉGICAS (máximo 5, priorizadas)\n"
+              f"4. ACCIONES INMEDIATAS (máximo 3 para los próximos 30 días)\n"
+              f"5. ALERTAS (atención urgente)\n"
+              f"6. NOTA SOBRE SUBREGISTRO\n\n"
+              f"Lenguaje profesional, directo y orientado a toma de decisiones.")
     try:
-        resp = client.chat.complete(
-            model="mistral-large-latest",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1500
-        )
+        resp = client.chat.complete(model="mistral-large-latest",
+                                    messages=[{"role":"user","content":prompt}],
+                                    max_tokens=1500)
         return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {e}"
@@ -198,24 +234,880 @@ def detectar_subregistro(df, cols_texto=None):
     alertas = []
     total = len(df)
     if total < 10:
-        alertas.append(f"⚠️ Muestra pequeña: {total} registros. Resultados pueden no ser representativos.")
+        alertas.append(f"⚠️ Muestra pequeña: {total} registros.")
     if cols_texto:
         for col in cols_texto:
             if col in df.columns:
                 vacias = df[col].isna().sum() + (df[col].astype(str) == "").sum()
                 pct = round(vacias / total * 100, 1)
                 if pct > 20:
-                    alertas.append(f"⚠️ Columna '{col}': {pct}% de celdas vacías.")
-        longitudes = df[cols_texto[0]].dropna().astype(str).str.len()
-        if longitudes.mean() < 20:
-            alertas.append("⚠️ Respuestas muy cortas en promedio. Posible baja profundidad.")
+                    alertas.append(f"⚠️ Columna '{col}': {pct}% vacías.")
+        longs = df[cols_texto[0]].dropna().astype(str).str.len()
+        if longs.mean() < 20:
+            alertas.append("⚠️ Respuestas muy cortas en promedio.")
     if "cluster" in df.columns:
         dist = df["cluster"].value_counts(normalize=True)
         if dist.min() < 0.05:
-            alertas.append("⚠️ Hay grupos con menos del 5% de respuestas. Posible subrepresentación.")
+            alertas.append("⚠️ Hay grupos con menos del 5% de respuestas.")
     if not alertas:
         alertas.append("✅ No se detectaron señales evidentes de subregistro.")
     return alertas
+
+def normalizar_linea(texto):
+    texto_lower = str(texto).lower().strip()
+    for linea in LINEAS_CANONICAS:
+        palabras_clave = linea.lower().split()
+        if sum(1 for p in palabras_clave if p in texto_lower) >= len(palabras_clave) - 1:
+            return linea
+    for linea in LINEAS_CANONICAS:
+        if any(p in texto_lower for p in linea.lower().split() if len(p) > 4):
+            return linea
+    return None
+
+def clasificar_texto_enc(texto):
+    texto_lower = str(texto).lower()
+    temas = []
+    for tema, palabras in KEYWORDS_TEMAS.items():
+        if any(p in texto_lower for p in palabras):
+            temas.append(tema)
+    return temas if temas else ["Sin clasificar"]
+
+# ════════════════════════════════════════════════════════════════
+# COLORES Y ESTILOS EXCEL (globales)
+# ════════════════════════════════════════════════════════════════
+C_AZUL1   = "1F3864"
+C_AZUL2   = "2E75B6"
+C_AZULBG  = "D6E4F0"
+C_VERDE   = "1E7145"
+C_VERDEBG = "E2EFDA"
+C_AMARILLO= "BF8F00"
+C_AMARILLBG="FFF2CC"
+C_ROJO    = "C00000"
+C_rojoBG  = "FDECEA"
+C_GRIS    = "404040"
+
+def xlsx_header(cell, bg=None, fg="FFFFFF", bold=True, sz=10, center=True):
+    bg = bg or C_AZUL2
+    cell.fill = PatternFill(start_color=bg, end_color=bg, fill_type="solid")
+    cell.font = Font(color=fg, bold=bold, name="Calibri", size=sz)
+    if center:
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+def xlsx_data(cell, bg=None, bold=False, wrap=True, center=False):
+    if bg:
+        cell.fill = PatternFill(start_color=bg, end_color=bg, fill_type="solid")
+    cell.font = Font(name="Calibri", size=10, bold=bold, color=C_GRIS)
+    cell.alignment = Alignment(vertical="center", wrap_text=wrap,
+                               horizontal="center" if center else "left")
+
+def semaforo_cf(ws, rng, col_ref, verde_formula, amarillo_formula, rojo_formula):
+    """Agrega formato condicional de semáforo a un rango."""
+    ws.conditional_formatting.add(rng, FormulaRule(
+        formula=[verde_formula],
+        fill=PatternFill(start_color=C_VERDEBG, end_color=C_VERDEBG, fill_type="solid"),
+        font=Font(color=C_VERDE, bold=True, name="Calibri")))
+    ws.conditional_formatting.add(rng, FormulaRule(
+        formula=[amarillo_formula],
+        fill=PatternFill(start_color=C_AMARILLBG, end_color=C_AMARILLBG, fill_type="solid"),
+        font=Font(color=C_AMARILLO, bold=True, name="Calibri")))
+    ws.conditional_formatting.add(rng, FormulaRule(
+        formula=[rojo_formula],
+        fill=PatternFill(start_color=C_rojoBG, end_color=C_rojoBG, fill_type="solid"),
+        font=Font(color=C_ROJO, bold=True, name="Calibri")))
+
+# ════════════════════════════════════════════════════════════════
+# BUILDER EXCEL — MÓDULO ENCUESTA CON FÓRMULAS
+# ════════════════════════════════════════════════════════════════
+def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
+    """
+    Crea workbook openpyxl con fórmulas reales para el módulo Encuesta.
+    cfg: dict con organizacion, cliente, municipios, periodo, escala_max,
+         col_proyecto, cols_likert, cols_sino, col_cal, cols_texto, proyectos_lista
+    resultados: dict con filas_consolidado, filas_tri, filas_cual, sin_clasificar
+    """
+    escala_max  = cfg.get("escala_max", 3)
+    col_proy    = cfg.get("col_proyecto")
+    cols_likert = cfg.get("cols_likert", [])
+    cols_sino   = cfg.get("cols_sino", [])
+    col_cal     = cfg.get("col_cal")
+    cols_texto  = cfg.get("cols_texto", [])
+    proyectos   = cfg.get("proyectos_lista", [])
+    umbral_tri  = 0.5 if escala_max == 3 else 1.0
+
+    # Filas de CONFIG (para fórmulas que referencian CONFIG)
+    ROW_ESCALA  = 8   # B8 = valor escala_max
+    ROW_VERDE   = 9   # B9 = =B8*0.9
+    ROW_AMARI   = 10  # B10 = =B8*0.67
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    # ── 1. CONFIG ─────────────────────────────────────────────────
+    ws_cfg = wb.create_sheet("CONFIG")
+    ws_cfg.column_dimensions["A"].width = 32
+    ws_cfg.column_dimensions["B"].width = 42
+
+    secciones_cfg = [
+        ("INFORMACIÓN GENERAL", None, True),
+        ("Organización ejecutora", cfg.get("organizacion",""), False),
+        ("Empresa cliente",        cfg.get("cliente",""),      False),
+        ("Municipios / Territorios",cfg.get("municipios",""),  False),
+        ("Período de evaluación",  cfg.get("periodo",""),      False),
+        (None, None, False),
+        ("UMBRALES DE SEMÁFORO (se actualizan automáticamente)", None, True),
+        ("Escala máxima Likert",   escala_max,                 False),
+        ("Umbral Verde (≥)",       "=B8*0.9",                  False),
+        ("Umbral Amarillo (≥)",    "=B8*0.67",                 False),
+        ("Umbral Rojo (<)",        "=B10",                     False),
+        (None, None, False),
+        ("PROYECTOS ANALIZADOS", None, True),
+    ]
+
+    for ri_c, (k, v, es_titulo) in enumerate(secciones_cfg, 1):
+        if k:
+            ws_cfg.cell(ri_c, 1).value = k
+            if es_titulo:
+                xlsx_header(ws_cfg.cell(ri_c, 1), bg=C_AZUL1, sz=11)
+                ws_cfg.merge_cells(f"A{ri_c}:B{ri_c}")
+            else:
+                xlsx_data(ws_cfg.cell(ri_c, 1), bold=True)
+        if v is not None:
+            ws_cfg.cell(ri_c, 2).value = v
+            xlsx_data(ws_cfg.cell(ri_c, 2))
+
+    proy_start = len(secciones_cfg) + 1
+    for j, proy in enumerate(proyectos):
+        ws_cfg.cell(proy_start + j, 1).value = f"Proyecto {j+1}"
+        ws_cfg.cell(proy_start + j, 2).value = proy
+        xlsx_data(ws_cfg.cell(proy_start + j, 1), bold=True)
+        xlsx_data(ws_cfg.cell(proy_start + j, 2))
+
+    ws_cfg.freeze_panes = "B2"
+
+    # ── 2. Hojas de datos crudos ──────────────────────────────────
+    grupo_meta = {}   # {grupo: {col_name: col_idx, '_sheet': str, '_nrows': int}}
+
+    for grupo, df_g in dfs_ok.items():
+        sname = f"1_{grupo[:9]}"
+        ws_g = wb.create_sheet(sname)
+        cols_g = list(df_g.columns)
+        col_map = {}
+
+        for ci, col_h in enumerate(cols_g, 1):
+            cell_h = ws_g.cell(1, ci)
+            cell_h.value = col_h
+            xlsx_header(cell_h)
+            ws_g.column_dimensions[get_column_letter(ci)].width = max(14, len(str(col_h)) + 6)
+            col_map[col_h] = ci
+
+        for ri, (_, row_g) in enumerate(df_g.iterrows(), 2):
+            for ci, col_h in enumerate(cols_g, 1):
+                val = row_g[col_h]
+                if pd.notna(val):
+                    ws_g.cell(ri, ci).value = val
+                xlsx_data(ws_g.cell(ri, ci))
+
+        # Validación de datos para columnas Likert
+        for cl in cols_likert:
+            if cl in col_map:
+                cltr = get_column_letter(col_map[cl])
+                dv = DataValidation(
+                    type="whole", operator="between",
+                    formula1="1", formula2=str(escala_max),
+                    showErrorMessage=True,
+                    errorTitle="Valor inválido",
+                    error=f"Ingresa un entero entre 1 y {escala_max}")
+                ws_g.add_data_validation(dv)
+                dv.add(f"{cltr}2:{cltr}1000")
+
+        ws_g.freeze_panes = "A2"
+        grupo_meta[grupo] = col_map
+        grupo_meta[grupo]["_sheet"] = sname
+        grupo_meta[grupo]["_nrows"] = len(df_g)
+
+    # ── 3. 2_Likert: AVERAGEIFS + semáforo condicional ───────────
+    if cols_likert and proyectos:
+        ws_lk = wb.create_sheet("2_Likert")
+        ws_lk.column_dimensions["A"].width = 36
+
+        hdrs_lk = ["Proyecto"]
+        for cl in cols_likert:
+            for gr in dfs_ok:
+                if cl in grupo_meta.get(gr, {}):
+                    hdrs_lk.append(f"{cl} | {gr}")
+
+        for ci, h in enumerate(hdrs_lk, 1):
+            xlsx_header(ws_lk.cell(1, ci))
+            ws_lk.cell(1, ci).value = h
+            ws_lk.column_dimensions[get_column_letter(ci)].width = 22
+
+        lk_col_letters = []
+        for ri, proy in enumerate(proyectos, 2):
+            ws_lk.cell(ri, 1).value = proy
+            xlsx_data(ws_lk.cell(ri, 1), bold=True)
+            ci_lk = 2
+            for cl in cols_likert:
+                for gr, gm in grupo_meta.items():
+                    if cl not in gm or "_sheet" not in gm:
+                        continue
+                    sht     = gm["_sheet"]
+                    cl_idx  = gm[cl]
+                    cl_ltr  = get_column_letter(cl_idx)
+                    nrows   = gm.get("_nrows", 1000)
+
+                    if col_proy and col_proy in gm:
+                        pry_ltr = get_column_letter(gm[col_proy])
+                        f = (f"=IFERROR(AVERAGEIFS("
+                             f"'{sht}'!{cl_ltr}$2:{cl_ltr}${nrows+1},"
+                             f"'{sht}'!{pry_ltr}$2:{pry_ltr}${nrows+1},"
+                             f"$A{ri}),\"\")")
+                    else:
+                        f = (f"=IFERROR(AVERAGE("
+                             f"'{sht}'!{cl_ltr}$2:{cl_ltr}${nrows+1}),\"\")")
+
+                    cell_lk = ws_lk.cell(ri, ci_lk)
+                    cell_lk.value = f
+                    cell_lk.number_format = "0.00"
+                    xlsx_data(cell_lk)
+                    lk_col_letters.append(get_column_letter(ci_lk))
+                    ci_lk += 1
+
+        n_proy = len(proyectos)
+        for cl_cf in set(lk_col_letters):
+            rng = f"{cl_cf}2:{cl_cf}{n_proy + 1}"
+            semaforo_cf(ws_lk, rng, cl_cf,
+                verde_formula  = f"{cl_cf}2>=CONFIG!$B${ROW_VERDE}",
+                amarillo_formula = (f"AND({cl_cf}2>=CONFIG!$B${ROW_AMARI},"
+                                    f"{cl_cf}2<CONFIG!$B${ROW_VERDE})"),
+                rojo_formula   = (f"AND(ISNUMBER({cl_cf}2),"
+                                  f"{cl_cf}2<CONFIG!$B${ROW_AMARI})"))
+
+        nota_lk = n_proy + 3
+        ws_lk.cell(nota_lk, 1).value = (
+            "🟢 Destacado (≥ 90% escala)  |  🟡 Aceptable (67-89%)  |  "
+            "🔴 Crítico (< 67%)  |  Umbrales se leen automáticamente desde CONFIG")
+        ws_lk.cell(nota_lk, 1).font = Font(italic=True, color="777777", name="Calibri")
+        ws_lk.freeze_panes = "B2"
+
+    # ── 4. 3_SiNo_Cal: COUNTIFS + AVERAGEIFS calificación ────────
+    if (cols_sino or col_cal) and proyectos:
+        ws_sn = wb.create_sheet("3_SiNo_Cal")
+        ws_sn.column_dimensions["A"].width = 36
+
+        hdrs_sn = ["Proyecto"]
+        for cs in cols_sino:
+            for gr in dfs_ok:
+                if cs in grupo_meta.get(gr, {}):
+                    hdrs_sn.append(f"% Sí — {cs} | {gr}")
+        if col_cal:
+            for gr in dfs_ok:
+                if col_cal in grupo_meta.get(gr, {}):
+                    hdrs_sn.append(f"Calificación 1-5 | {gr}")
+
+        for ci, h in enumerate(hdrs_sn, 1):
+            xlsx_header(ws_sn.cell(1, ci))
+            ws_sn.cell(1, ci).value = h
+            ws_sn.column_dimensions[get_column_letter(ci)].width = 28
+
+        cal_cols_cf = []
+        for ri, proy in enumerate(proyectos, 2):
+            ws_sn.cell(ri, 1).value = proy
+            xlsx_data(ws_sn.cell(ri, 1), bold=True)
+            ci_sn = 2
+
+            for cs in cols_sino:
+                for gr, gm in grupo_meta.items():
+                    if cs not in gm or "_sheet" not in gm:
+                        continue
+                    sht    = gm["_sheet"]
+                    cs_ltr = get_column_letter(gm[cs])
+                    nrows  = gm.get("_nrows", 1000)
+
+                    if col_proy and col_proy in gm:
+                        py_ltr = get_column_letter(gm[col_proy])
+                        # Cuenta "Sí" / total no vacío para ese proyecto
+                        f_si = (f"=IFERROR("
+                                f"(COUNTIFS('{sht}'!{py_ltr}$2:{py_ltr}${nrows+1},$A{ri},"
+                                f"'{sht}'!{cs_ltr}$2:{cs_ltr}${nrows+1},\"Sí\")"
+                                f"+COUNTIFS('{sht}'!{py_ltr}$2:{py_ltr}${nrows+1},$A{ri},"
+                                f"'{sht}'!{cs_ltr}$2:{cs_ltr}${nrows+1},\"Si\"))"
+                                f"/COUNTIFS('{sht}'!{py_ltr}$2:{py_ltr}${nrows+1},$A{ri},"
+                                f"'{sht}'!{cs_ltr}$2:{cs_ltr}${nrows+1},\"<>\"),\"\")")
+                    else:
+                        f_si = (f"=IFERROR("
+                                f"(COUNTIF('{sht}'!{cs_ltr}$2:{cs_ltr}${nrows+1},\"Sí\")"
+                                f"+COUNTIF('{sht}'!{cs_ltr}$2:{cs_ltr}${nrows+1},\"Si\"))"
+                                f"/COUNTA('{sht}'!{cs_ltr}$2:{cs_ltr}${nrows+1}),\"\")")
+
+                    cell_sn = ws_sn.cell(ri, ci_sn)
+                    cell_sn.value = f_si
+                    cell_sn.number_format = "0%"
+                    xlsx_data(cell_sn)
+                    ci_sn += 1
+
+            if col_cal:
+                for gr, gm in grupo_meta.items():
+                    if col_cal not in gm or "_sheet" not in gm:
+                        continue
+                    sht     = gm["_sheet"]
+                    cal_ltr = get_column_letter(gm[col_cal])
+                    nrows   = gm.get("_nrows", 1000)
+
+                    if col_proy and col_proy in gm:
+                        py_ltr = get_column_letter(gm[col_proy])
+                        f_cal = (f"=IFERROR(AVERAGEIFS("
+                                 f"'{sht}'!{cal_ltr}$2:{cal_ltr}${nrows+1},"
+                                 f"'{sht}'!{py_ltr}$2:{py_ltr}${nrows+1},$A{ri}),\"\")")
+                    else:
+                        f_cal = (f"=IFERROR(AVERAGE("
+                                 f"'{sht}'!{cal_ltr}$2:{cal_ltr}${nrows+1}),\"\")")
+
+                    cell_cal = ws_sn.cell(ri, ci_sn)
+                    cell_cal.value = f_cal
+                    cell_cal.number_format = "0.00"
+                    xlsx_data(cell_cal)
+                    cal_cols_cf.append((get_column_letter(ci_sn), len(proyectos)))
+                    ci_sn += 1
+
+        for cl_cal_cf, n_p in cal_cols_cf:
+            rng_cal = f"{cl_cal_cf}2:{cl_cal_cf}{n_p + 1}"
+            semaforo_cf(ws_sn, rng_cal, cl_cal_cf,
+                verde_formula   = f"{cl_cal_cf}2>=4.5",
+                amarillo_formula = f"AND({cl_cal_cf}2>=3.5,{cl_cal_cf}2<4.5)",
+                rojo_formula    = f"AND(ISNUMBER({cl_cal_cf}2),{cl_cal_cf}2<3.5)")
+
+        ws_sn.freeze_panes = "B2"
+
+    # ── 5. 4_Triangulacion: MAX-MIN + Convergencia ────────────────
+    if cols_likert and len(dfs_ok) >= 2 and proyectos:
+        ws_tri = wb.create_sheet("4_Triangulacion")
+        grupos_t = list(dfs_ok.keys())
+        hdrs_t = ["Proyecto", "Indicador"] + grupos_t + ["Rango MAX-MIN", "Convergencia"]
+        for ci, h in enumerate(hdrs_t, 1):
+            xlsx_header(ws_tri.cell(1, ci))
+            ws_tri.cell(1, ci).value = h
+            ws_tri.column_dimensions[get_column_letter(ci)].width = (
+                36 if ci == 1 else (28 if ci == 2 else 18))
+
+        ri_t = 2
+        for proy in proyectos:
+            for cl in cols_likert:
+                ws_tri.cell(ri_t, 1).value = proy
+                ws_tri.cell(ri_t, 2).value = cl
+                xlsx_data(ws_tri.cell(ri_t, 1), bold=True)
+                xlsx_data(ws_tri.cell(ri_t, 2))
+
+                ci_t = 3
+                grupo_val_refs = []
+                for gr in grupos_t:
+                    gm = grupo_meta.get(gr, {})
+                    if cl in gm and "_sheet" in gm:
+                        sht    = gm["_sheet"]
+                        cl_ltr = get_column_letter(gm[cl])
+                        nrows  = gm.get("_nrows", 1000)
+                        if col_proy and col_proy in gm:
+                            py_ltr = get_column_letter(gm[col_proy])
+                            f_t = (f"=IFERROR(AVERAGEIFS("
+                                   f"'{sht}'!{cl_ltr}$2:{cl_ltr}${nrows+1},"
+                                   f"'{sht}'!{py_ltr}$2:{py_ltr}${nrows+1},"
+                                   f"$A{ri_t}),\"\")")
+                        else:
+                            f_t = (f"=IFERROR(AVERAGE("
+                                   f"'{sht}'!{cl_ltr}$2:{cl_ltr}${nrows+1}),\"\")")
+                        cell_t = ws_tri.cell(ri_t, ci_t)
+                        cell_t.value = f_t
+                        cell_t.number_format = "0.00"
+                        xlsx_data(cell_t)
+                        grupo_val_refs.append(f"{get_column_letter(ci_t)}{ri_t}")
+                    else:
+                        ws_tri.cell(ri_t, ci_t).value = "Sin dato"
+                        xlsx_data(ws_tri.cell(ri_t, ci_t), bg=C_AZULBG)
+                    ci_t += 1
+
+                # Rango MAX-MIN
+                if grupo_val_refs:
+                    refs = ",".join(grupo_val_refs)
+                    rango_ci = ci_t
+                    rango_ltr = get_column_letter(rango_ci)
+                    cell_rng = ws_tri.cell(ri_t, rango_ci)
+                    cell_rng.value = f"=IFERROR(MAX({refs})-MIN({refs}),\"\")"
+                    cell_rng.number_format = "0.00"
+                    xlsx_data(cell_rng)
+                    ci_t += 1
+
+                    # Convergencia
+                    cell_conv = ws_tri.cell(ri_t, ci_t)
+                    cell_conv.value = (f"=IFERROR(IF({rango_ltr}{ri_t}<={umbral_tri},"
+                                       f'"✅ Convergencia","⚠️ Divergencia"),"")')
+                    xlsx_data(cell_conv)
+
+                    conv_ltr = get_column_letter(ci_t)
+                    n_p_t = len(proyectos) * len(cols_likert)
+                    rng_cv = f"{conv_ltr}2:{conv_ltr}{n_p_t + 1}"
+                    ws_tri.conditional_formatting.add(rng_cv, FormulaRule(
+                        formula=[f'{conv_ltr}{ri_t}="✅ Convergencia"'],
+                        fill=PatternFill(start_color=C_VERDEBG, end_color=C_VERDEBG,
+                                        fill_type="solid")))
+                    ws_tri.conditional_formatting.add(rng_cv, FormulaRule(
+                        formula=[f'{conv_ltr}{ri_t}="⚠️ Divergencia"'],
+                        fill=PatternFill(start_color=C_rojoBG, end_color=C_rojoBG,
+                                        fill_type="solid")))
+
+                ri_t += 1
+
+        nota_t = ri_t + 1
+        ws_tri.cell(nota_t, 1).value = (
+            f"Umbral de convergencia: diferencia MAX-MIN ≤ {umbral_tri} "
+            f"({'escala 1-3' if escala_max == 3 else 'escala 1-5'})")
+        ws_tri.cell(nota_t, 1).font = Font(italic=True, color="777777", name="Calibri")
+        ws_tri.freeze_panes = "C2"
+
+    # ── 6. 5_Abiertas: datos cualitativos + desplegable ──────────
+    if cols_texto:
+        ws_ab = wb.create_sheet("5_Abiertas")
+        ws_ab.column_dimensions["A"].width = 16
+        ws_ab.column_dimensions["B"].width = 22
+        ws_ab.column_dimensions["C"].width = 22
+        ws_ab.column_dimensions["D"].width = 60
+        ws_ab.column_dimensions["E"].width = 32
+
+        hdrs_ab = ["Grupo", "Proyecto", "Columna", "Respuesta", "Tema (editar)"]
+        for ci, h in enumerate(hdrs_ab, 1):
+            xlsx_header(ws_ab.cell(1, ci))
+            ws_ab.cell(1, ci).value = h
+
+        temas_lista = list(KEYWORDS_TEMAS.keys()) + ["Sin clasificar"]
+        temas_str = ",".join(temas_lista)
+        dv_temas = DataValidation(type="list", formula1=f'"{temas_str}"',
+                                  showErrorMessage=False)
+        ws_ab.add_data_validation(dv_temas)
+
+        ri_ab = 2
+        for gr, df_g in dfs_ok.items():
+            for ct in cols_texto:
+                if ct not in df_g.columns:
+                    continue
+                for _, row_ab in df_g.iterrows():
+                    txt = str(row_ab.get(ct, ""))
+                    if txt and txt != "nan" and len(txt.strip()) > 2:
+                        proy_ab = ""
+                        if col_proy and col_proy in df_g.columns:
+                            proy_ab = str(row_ab.get(col_proy, ""))
+                        tema_sug = "Sin clasificar"
+                        txt_low = txt.lower()
+                        for tema_k, pals in KEYWORDS_TEMAS.items():
+                            if any(p in txt_low for p in pals):
+                                tema_sug = tema_k
+                                break
+                        ws_ab.cell(ri_ab, 1).value = gr
+                        ws_ab.cell(ri_ab, 2).value = proy_ab
+                        ws_ab.cell(ri_ab, 3).value = ct
+                        ws_ab.cell(ri_ab, 4).value = txt
+                        ws_ab.cell(ri_ab, 5).value = tema_sug
+                        ws_ab.cell(ri_ab, 4).alignment = Alignment(wrap_text=True,
+                                                                    vertical="top")
+                        dv_temas.add(f"E{ri_ab}")
+                        # Color Sin clasificar
+                        if tema_sug == "Sin clasificar":
+                            ws_ab.cell(ri_ab, 5).fill = PatternFill(
+                                start_color=C_AMARILLBG, end_color=C_AMARILLBG,
+                                fill_type="solid")
+                        ri_ab += 1
+
+        ws_ab.freeze_panes = "A2"
+
+    # ── 7. 6_Dashboard ───────────────────────────────────────────
+    ws_dash = wb.create_sheet("6_Dashboard")
+    ws_dash.column_dimensions["A"].width = 34
+    ws_dash.column_dimensions["B"].width = 24
+    ws_dash.column_dimensions["C"].width = 24
+    ws_dash.column_dimensions["D"].width = 24
+
+    # Título
+    tc = ws_dash.cell(1, 1)
+    tc.value = "DASHBOARD EJECUTIVO — ENCUESTA DE INVERSIÓN SOCIAL"
+    tc.font = Font(bold=True, size=14, color="FFFFFF", name="Calibri")
+    tc.fill = PatternFill(start_color=C_AZUL1, end_color=C_AZUL1, fill_type="solid")
+    tc.alignment = Alignment(horizontal="center")
+    ws_dash.merge_cells("A1:D1")
+    ws_dash.row_dimensions[1].height = 28
+
+    meta_fields = [
+        ("Organización:", "=CONFIG!B2"),
+        ("Empresa cliente:", "=CONFIG!B3"),
+        ("Municipios:", "=CONFIG!B4"),
+        ("Período:", "=CONFIG!B5"),
+        ("Escala Likert (máximo):", "=CONFIG!B8"),
+        ("Umbral Verde (≥):", f"=CONFIG!B{ROW_VERDE}"),
+        ("Umbral Amarillo (≥):", f"=CONFIG!B{ROW_AMARI}"),
+    ]
+    for ri_d, (lbl, val) in enumerate(meta_fields, 3):
+        ws_dash.cell(ri_d, 1).value = lbl
+        ws_dash.cell(ri_d, 2).value = val
+        xlsx_data(ws_dash.cell(ri_d, 1), bold=True)
+        xlsx_data(ws_dash.cell(ri_d, 2))
+
+    ri_d_hdr = 11
+    xlsx_header(ws_dash.cell(ri_d_hdr, 1), bg=C_AZUL2)
+    ws_dash.cell(ri_d_hdr, 1).value = "RESUMEN POR PROYECTO"
+    ws_dash.merge_cells(f"A{ri_d_hdr}:D{ri_d_hdr}")
+
+    hdrs_dash = ["Proyecto", "Grupos", "Indicadores Likert", "Detalle en hoja"]
+    for ci, h in enumerate(hdrs_dash, 1):
+        xlsx_header(ws_dash.cell(ri_d_hdr + 1, ci), bg=C_AZUL2)
+        ws_dash.cell(ri_d_hdr + 1, ci).value = h
+
+    for j, proy in enumerate(proyectos, ri_d_hdr + 2):
+        ws_dash.cell(j, 1).value = proy
+        ws_dash.cell(j, 2).value = ", ".join(dfs_ok.keys())
+        ws_dash.cell(j, 3).value = ", ".join(cols_likert) if cols_likert else "—"
+        ws_dash.cell(j, 4).value = "Ver 2_Likert · 3_SiNo_Cal · 4_Triangulacion"
+        for ci_d in range(1, 5):
+            xlsx_data(ws_dash.cell(j, ci_d))
+
+    # ── 8. 7_Guia ────────────────────────────────────────────────
+    ws_guia = wb.create_sheet("7_Guia")
+    ws_guia.column_dimensions["A"].width = 85
+
+    xlsx_header(ws_guia.cell(1, 1), bg=C_AZUL1, sz=13)
+    ws_guia.cell(1, 1).value = "GUÍA DE USO — SISTEMA EXCEL ENCUESTA"
+
+    guia = [
+        "",
+        "HOJAS DE ESTE ARCHIVO",
+        "  CONFIG          → Cerebro del sistema. Modifica aquí los umbrales; todo se actualiza solo.",
+        "  1_Comunidad / 1_Aliados / 1_Empresa → Datos crudos con validación automática de Likert.",
+        "  2_Likert         → Promedios AVERAGEIFS por proyecto. Semáforo 🟢🟡🔴 automático.",
+        "  3_SiNo_Cal       → COUNTIFS para Sí/No. AVERAGEIFS para calificación 1-5.",
+        "  4_Triangulacion  → MAX-MIN entre grupos. ✅ Convergencia / ⚠️ Divergencia automática.",
+        "  5_Abiertas       → Respuestas cualitativas. Usa el desplegable en columna E para reclasificar.",
+        "  6_Dashboard      → Resumen ejecutivo con fórmulas que leen desde CONFIG.",
+        "",
+        "CÓMO FUNCIONAN LOS SEMÁFOROS",
+        f"  Escala actual: 1 a {escala_max}",
+        f"  🟢 Destacado  = promedio ≥ {escala_max * 0.9:.2f}  (90% de la escala)",
+        f"  🟡 Aceptable  = promedio {escala_max * 0.67:.2f}–{escala_max * 0.9 - 0.01:.2f}  (67-89%)",
+        f"  🔴 Crítico    = promedio < {escala_max * 0.67:.2f}  (menos del 67%)",
+        "  Si cambias la escala en CONFIG!B8, los umbrales y colores se recalculan solos.",
+        "",
+        "CÓMO AGREGAR DATOS NUEVOS",
+        "  1. Agrega filas al final de las hojas 1_Comunidad / 1_Aliados / 1_Empresa.",
+        "  2. Los promedios en 2_Likert, 3_SiNo_Cal y 4_Triangulacion se actualizan automáticamente.",
+        "  3. NO modifiques las fórmulas de las hojas 2, 3 y 4 — solo agrega datos en las hojas 1.",
+        "",
+        "TRIANGULACIÓN",
+        f"  Umbral de convergencia: diferencia MAX-MIN ≤ {umbral_tri}",
+        "  Si solo un grupo tiene datos, la triangulación muestra 'Sin dato' en los grupos faltantes.",
+        "",
+        "RESPUESTAS ABIERTAS (hoja 5_Abiertas)",
+        "  Columna E = tema sugerido automáticamente. Puedes cambiar el tema con el desplegable.",
+        "  Las respuestas amarillas son 'Sin clasificar' — revísalas manualmente.",
+        "",
+        "Generado automáticamente por el Módulo de Encuesta — Análisis Semántico.",
+    ]
+    for i, line in enumerate(guia, 2):
+        ws_guia.cell(i, 1).value = line
+        if line and not line.startswith(" ") and line.isupper():
+            ws_guia.cell(i, 1).font = Font(bold=True, color=C_AZUL1, name="Calibri")
+        elif line.startswith("  ") and line.strip().startswith("🟢"):
+            ws_guia.cell(i, 1).fill = PatternFill(start_color=C_VERDEBG,
+                                                   end_color=C_VERDEBG, fill_type="solid")
+        elif line.startswith("  ") and line.strip().startswith("🟡"):
+            ws_guia.cell(i, 1).fill = PatternFill(start_color=C_AMARILLBG,
+                                                   end_color=C_AMARILLBG, fill_type="solid")
+        elif line.startswith("  ") and line.strip().startswith("🔴"):
+            ws_guia.cell(i, 1).fill = PatternFill(start_color=C_rojoBG,
+                                                   end_color=C_rojoBG, fill_type="solid")
+        else:
+            ws_guia.cell(i, 1).font = Font(name="Calibri", size=10)
+
+    return wb
+
+
+# ════════════════════════════════════════════════════════════════
+# BUILDER EXCEL — MÓDULO CARTOGRAFÍA CON FÓRMULAS
+# ════════════════════════════════════════════════════════════════
+def crear_excel_cartografia_formulas(df_filtrado, comp_filtro, cat_por_componente,
+                                     cat_por_vereda, conteo_comp, pesos_c, resumen_exec,
+                                     contexto="diagnóstico territorial participativo"):
+    """Crea workbook openpyxl con fórmulas y formato para Cartografía Social."""
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    # ── CONFIG Cartografía ────────────────────────────────────────
+    ws_cfg = wb.create_sheet("CONFIG")
+    ws_cfg.column_dimensions["A"].width = 32
+    ws_cfg.column_dimensions["B"].width = 42
+    xlsx_header(ws_cfg.cell(1, 1), bg=C_AZUL1, sz=12)
+    ws_cfg.cell(1, 1).value = "CONFIGURACIÓN — CARTOGRAFÍA SOCIAL"
+    ws_cfg.merge_cells("A1:B1")
+
+    cfg_cart = [
+        ("Contexto del análisis", contexto),
+        ("Componentes analizados", ", ".join(comp_filtro)),
+        ("Total frases", len(df_filtrado)),
+        ("Umbral similitud semántica", 0.75),
+        ("Máx. frases representativas", 5),
+        ("Líneas canónicas",
+         " | ".join(LINEAS_CANONICAS)),
+    ]
+    for ri_c, (k, v) in enumerate(cfg_cart, 2):
+        ws_cfg.cell(ri_c, 1).value = k
+        ws_cfg.cell(ri_c, 2).value = v
+        xlsx_data(ws_cfg.cell(ri_c, 1), bold=True)
+        xlsx_data(ws_cfg.cell(ri_c, 2))
+
+    # ── Datos completos ───────────────────────────────────────────
+    ws_dat = wb.create_sheet("Datos completos")
+    cols_meta_e = [c for c in ["municipio","vereda","año","semestre"]
+                   if c in df_filtrado.columns]
+    cols_dat = cols_meta_e + ["componente","frase","grupo","peso_semantico","lineas_inversion"]
+    cols_dat = [c for c in cols_dat if c in df_filtrado.columns]
+    for ci, h in enumerate(cols_dat, 1):
+        xlsx_header(ws_dat.cell(1, ci))
+        ws_dat.cell(1, ci).value = h
+        ws_dat.column_dimensions[get_column_letter(ci)].width = max(14, len(h) + 6)
+    for ri_d, (_, row_d) in enumerate(df_filtrado[cols_dat].iterrows(), 2):
+        for ci, col_d in enumerate(cols_dat, 1):
+            val_d = row_d[col_d]
+            if pd.notna(val_d):
+                ws_dat.cell(ri_d, ci).value = val_d
+            xlsx_data(ws_dat.cell(ri_d, ci))
+            # Formato condicional en peso_semantico
+    if "peso_semantico" in cols_dat:
+        ps_ci = cols_dat.index("peso_semantico") + 1
+        ps_ltr = get_column_letter(ps_ci)
+        n_dat = len(df_filtrado)
+        rng_ps = f"{ps_ltr}2:{ps_ltr}{n_dat + 1}"
+        semaforo_cf(ws_dat, rng_ps, ps_ltr,
+            verde_formula   = f"{ps_ltr}2>=0.85",
+            amarillo_formula = f"AND({ps_ltr}2>=0.65,{ps_ltr}2<0.85)",
+            rojo_formula    = f"AND(ISNUMBER({ps_ltr}2),{ps_ltr}2<0.65)")
+    ws_dat.freeze_panes = "A2"
+
+    # ── Distribución componentes ──────────────────────────────────
+    ws_dc = wb.create_sheet("Distribucion componentes")
+    for ci, h in enumerate(conteo_comp.columns, 1):
+        xlsx_header(ws_dc.cell(1, ci))
+        ws_dc.cell(1, ci).value = h
+        ws_dc.column_dimensions[get_column_letter(ci)].width = 28
+    for ri_c, (_, row_c) in enumerate(conteo_comp.iterrows(), 2):
+        for ci, col_c in enumerate(conteo_comp.columns, 1):
+            ws_dc.cell(ri_c, ci).value = row_c[col_c]
+            xlsx_data(ws_dc.cell(ri_c, ci))
+    # Fórmulas: total y porcentaje
+    n_comp = len(conteo_comp)
+    ws_dc.cell(n_comp + 2, 1).value = "TOTAL"
+    ws_dc.cell(n_comp + 2, 1).font = Font(bold=True, name="Calibri")
+    ws_dc.cell(n_comp + 2, 2).value = f"=SUM(B2:B{n_comp + 1})"
+    ws_dc.cell(n_comp + 2, 2).font = Font(bold=True, name="Calibri")
+    # Columna porcentaje
+    xlsx_header(ws_dc.cell(1, 3), bg=C_AZULBG, fg=C_GRIS)
+    ws_dc.cell(1, 3).value = "Porcentaje"
+    ws_dc.column_dimensions["C"].width = 16
+    for ri_pct in range(2, n_comp + 2):
+        ws_dc.cell(ri_pct, 3).value = f"=B{ri_pct}/B{n_comp + 2}"
+        ws_dc.cell(ri_pct, 3).number_format = "0.0%"
+
+    # ── Líneas de inversión ───────────────────────────────────────
+    lineas_exp = []
+    for ls in df_filtrado["lineas_inversion"]:
+        for l in str(ls).split(","):
+            norm = normalizar_linea(l.strip().rstrip(".").strip())
+            if norm:
+                lineas_exp.append(norm)
+    if lineas_exp:
+        ws_li = wb.create_sheet("Lineas de inversion")
+        df_li = pd.DataFrame({"linea": lineas_exp})
+        cnt_li = df_li["linea"].value_counts().reset_index()
+        cnt_li.columns = ["Línea de inversión", "Frecuencia"]
+        for ci, h in enumerate(cnt_li.columns, 1):
+            xlsx_header(ws_li.cell(1, ci))
+            ws_li.cell(1, ci).value = h
+            ws_li.column_dimensions[get_column_letter(ci)].width = 32
+        for ri_li, (_, row_li) in enumerate(cnt_li.iterrows(), 2):
+            for ci, col_li in enumerate(cnt_li.columns, 1):
+                ws_li.cell(ri_li, ci).value = row_li[col_li]
+                xlsx_data(ws_li.cell(ri_li, ci))
+        n_li = len(cnt_li)
+        ws_li.cell(n_li + 2, 1).value = "TOTAL"
+        ws_li.cell(n_li + 2, 1).font = Font(bold=True, name="Calibri")
+        ws_li.cell(n_li + 2, 2).value = f"=SUM(B2:B{n_li + 1})"
+        ws_li.cell(n_li + 2, 2).font = Font(bold=True, name="Calibri")
+
+    # ── Cruce componente x línea ──────────────────────────────────
+    cruce_rows = []
+    for _, row_cr in df_filtrado.iterrows():
+        for l in str(row_cr["lineas_inversion"]).split(","):
+            norm = normalizar_linea(l.strip().rstrip(".").strip())
+            if norm:
+                cruce_rows.append({"Componente": row_cr["componente"], "Línea": norm})
+    if cruce_rows:
+        ws_cx = wb.create_sheet("Cruce componente x linea")
+        df_cx = pd.DataFrame(cruce_rows)
+        piv_cx = df_cx.groupby(["Componente","Línea"]).size().reset_index(name="Cantidad")
+        for ci, h in enumerate(piv_cx.columns, 1):
+            xlsx_header(ws_cx.cell(1, ci))
+            ws_cx.cell(1, ci).value = h
+            ws_cx.column_dimensions[get_column_letter(ci)].width = 30
+        for ri_cx, (_, row_cx) in enumerate(piv_cx.iterrows(), 2):
+            for ci, col_cx in enumerate(piv_cx.columns, 1):
+                ws_cx.cell(ri_cx, ci).value = row_cx[col_cx]
+                xlsx_data(ws_cx.cell(ri_cx, ci))
+
+    # ── Grupos por componente ─────────────────────────────────────
+    ws_gp = wb.create_sheet("Grupos por componente")
+    gp_hdrs = ["Componente","Grupo","Frecuencia","Frase representativa"]
+    for ci, h in enumerate(gp_hdrs, 1):
+        xlsx_header(ws_gp.cell(1, ci))
+        ws_gp.cell(1, ci).value = h
+        ws_gp.column_dimensions[get_column_letter(ci)].width = (
+            24 if ci < 3 else (16 if ci == 3 else 60))
+    ri_gp = 2
+    for comp_gp in comp_filtro:
+        sub_gp = df_filtrado[df_filtrado["componente"] == comp_gp]
+        for grp_gp in sub_gp["grupo"].unique():
+            sub_g = sub_gp[sub_gp["grupo"] == grp_gp]
+            frase_r = sub_g.nlargest(1, "peso_semantico").iloc[0]["frase"]
+            ws_gp.cell(ri_gp, 1).value = comp_gp
+            ws_gp.cell(ri_gp, 2).value = grp_gp
+            ws_gp.cell(ri_gp, 3).value = len(sub_g)
+            ws_gp.cell(ri_gp, 4).value = frase_r
+            ws_gp.cell(ri_gp, 4).alignment = Alignment(wrap_text=True, vertical="top")
+            for ci in range(1, 5):
+                xlsx_data(ws_gp.cell(ri_gp, ci))
+            ri_gp += 1
+
+    # ── Cohesión semántica con semáforo ──────────────────────────
+    ws_coh = wb.create_sheet("Cohesion semantica")
+    for ci, h in enumerate(pesos_c.columns, 1):
+        xlsx_header(ws_coh.cell(1, ci))
+        ws_coh.cell(1, ci).value = h
+        ws_coh.column_dimensions[get_column_letter(ci)].width = 28
+    for ri_coh, (_, row_coh) in enumerate(pesos_c.iterrows(), 2):
+        for ci, col_coh in enumerate(pesos_c.columns, 1):
+            ws_coh.cell(ri_coh, ci).value = row_coh[col_coh]
+            xlsx_data(ws_coh.cell(ri_coh, ci))
+    # Semáforo en columna de cohesión (segunda columna)
+    n_coh = len(pesos_c)
+    semaforo_cf(ws_coh, f"B2:B{n_coh + 1}", "B",
+        verde_formula   = "B2>=0.75",
+        amarillo_formula = "AND(B2>=0.55,B2<0.75)",
+        rojo_formula    = "AND(ISNUMBER(B2),B2<0.55)")
+    nota_coh = n_coh + 2
+    ws_coh.cell(nota_coh, 1).value = (
+        "🟢 Alta cohesión (≥0.75) | 🟡 Media (0.55-0.74) | 🔴 Baja (<0.55)")
+    ws_coh.cell(nota_coh, 1).font = Font(italic=True, color="777777", name="Calibri")
+
+    # ── Resumen ejecutivo ─────────────────────────────────────────
+    ws_re = wb.create_sheet("Resumen ejecutivo")
+    for ci, h in enumerate(resumen_exec.columns, 1):
+        xlsx_header(ws_re.cell(1, ci))
+        ws_re.cell(1, ci).value = h
+        ws_re.column_dimensions[get_column_letter(ci)].width = 24
+    for ri_re, (_, row_re) in enumerate(resumen_exec.iterrows(), 2):
+        for ci, col_re in enumerate(resumen_exec.columns, 1):
+            ws_re.cell(ri_re, ci).value = row_re[col_re]
+            xlsx_data(ws_re.cell(ri_re, ci))
+    n_re = len(resumen_exec)
+    ws_re.cell(n_re + 2, 1).value = "TOTAL FRASES"
+    ws_re.cell(n_re + 2, 1).font = Font(bold=True, name="Calibri")
+    ws_re.cell(n_re + 2, 2).value = f"=SUM(B2:B{n_re + 1})"
+    ws_re.cell(n_re + 2, 2).font = Font(bold=True, name="Calibri")
+
+    # ── Frases representativas ────────────────────────────────────
+    ws_fr = wb.create_sheet("Frases representativas")
+    fr_hdrs = ["Componente","Frase","Peso","Relevancia","Frases similares",
+               "Variaciones","Líneas de inversión"]
+    for ci, h in enumerate(fr_hdrs, 1):
+        xlsx_header(ws_fr.cell(1, ci))
+        ws_fr.cell(1, ci).value = h
+        ws_fr.column_dimensions[get_column_letter(ci)].width = (
+            22 if ci in [1,3,4,5] else 55)
+
+    ri_fr = 2
+    for comp_fr in comp_filtro:
+        sub_fr = df_filtrado[df_filtrado["componente"] == comp_fr]
+        top_fr = sub_fr.nlargest(5, "peso_semantico")
+        frases_v, vecs_v = [], []
+        for _, row_fr in top_fr.iterrows():
+            frase_fr = row_fr["frase"].strip()
+            if vecs_v:
+                v = modelo.encode([frase_fr])
+                sims_fr = cosine_similarity(v, vecs_v)[0]
+                if any(s > 0.75 for s in sims_fr):
+                    continue
+            peso_fr = round(float(row_fr["peso_semantico"]), 3)
+            rel_fr = "Alta 🔴" if peso_fr >= 0.85 else ("Media 🟡" if peso_fr >= 0.65 else "Baja 🟢")
+            grp_fr = row_fr["grupo"]
+            sub_g_fr = sub_fr[sub_fr["grupo"] == grp_fr]
+            otras_fr = sub_g_fr[sub_g_fr["frase"] != frase_fr]["frase"].head(2).tolist()
+            ws_fr.cell(ri_fr, 1).value = comp_fr
+            ws_fr.cell(ri_fr, 2).value = frase_fr
+            ws_fr.cell(ri_fr, 3).value = peso_fr
+            ws_fr.cell(ri_fr, 4).value = rel_fr
+            ws_fr.cell(ri_fr, 5).value = sub_g_fr.shape[0]
+            ws_fr.cell(ri_fr, 6).value = " | ".join(otras_fr)
+            ws_fr.cell(ri_fr, 7).value = str(row_fr["lineas_inversion"])
+            for ci in range(1, 8):
+                xlsx_data(ws_fr.cell(ri_fr, ci))
+                ws_fr.cell(ri_fr, ci).alignment = Alignment(wrap_text=True, vertical="top")
+            frases_v.append(frase_fr)
+            vecs_v.append(modelo.encode([frase_fr])[0])
+            ri_fr += 1
+
+    # ── Tabla detallada ───────────────────────────────────────────
+    ws_td = wb.create_sheet("Tabla detallada")
+    cols_td = [c for c in ["municipio","vereda","año","semestre","componente",
+                            "frase","grupo","peso_semantico","lineas_inversion"]
+               if c in df_filtrado.columns]
+    for ci, h in enumerate(cols_td, 1):
+        xlsx_header(ws_td.cell(1, ci))
+        ws_td.cell(1, ci).value = h
+        ws_td.column_dimensions[get_column_letter(ci)].width = max(14, len(h) + 6)
+    for ri_td, (_, row_td) in enumerate(df_filtrado[cols_td].iterrows(), 2):
+        for ci, col_td in enumerate(cols_td, 1):
+            val_td = row_td[col_td]
+            if pd.notna(val_td):
+                ws_td.cell(ri_td, ci).value = val_td
+            xlsx_data(ws_td.cell(ri_td, ci))
+    ws_td.freeze_panes = "A2"
+
+    # ── Categorización por componente ─────────────────────────────
+    ws_ccat = wb.create_sheet("Categorizacion componente")
+    for ci, h in enumerate(["Vereda","Componente","Categorización"], 1):
+        xlsx_header(ws_ccat.cell(1, ci))
+        ws_ccat.cell(1, ci).value = h
+        ws_ccat.column_dimensions[get_column_letter(ci)].width = (16 if ci<3 else 80)
+    ri_ccat = 2
+    for comp_cc, txt_cc in cat_por_componente.items():
+        for linea_cc in txt_cc.split("\n"):
+            if linea_cc.strip():
+                ws_ccat.cell(ri_ccat, 1).value = "TODAS"
+                ws_ccat.cell(ri_ccat, 2).value = comp_cc
+                ws_ccat.cell(ri_ccat, 3).value = linea_cc.strip()
+                ws_ccat.cell(ri_ccat, 3).alignment = Alignment(wrap_text=True,vertical="top")
+                ri_ccat += 1
+
+    # ── Categorización por vereda ─────────────────────────────────
+    ws_cver = wb.create_sheet("Categorizacion por vereda")
+    for ci, h in enumerate(["Vereda","Componente","Categorización"], 1):
+        xlsx_header(ws_cver.cell(1, ci))
+        ws_cver.cell(1, ci).value = h
+        ws_cver.column_dimensions[get_column_letter(ci)].width = (20 if ci<3 else 80)
+    ri_cver = 2
+    for comp_cv, veredas_cv in cat_por_vereda.items():
+        for vereda_cv, txt_cv in veredas_cv.items():
+            for linea_cv in txt_cv.split("\n"):
+                if linea_cv.strip():
+                    ws_cver.cell(ri_cver, 1).value = vereda_cv
+                    ws_cver.cell(ri_cver, 2).value = comp_cv
+                    ws_cver.cell(ri_cver, 3).value = linea_cv.strip()
+                    ws_cver.cell(ri_cver, 3).alignment = Alignment(wrap_text=True,vertical="top")
+                    ri_cver += 1
+
+    return wb
+
 
 # ════════════════════════════════════════════════════════════════
 # SELECTOR DE MODO
@@ -227,900 +1119,839 @@ modo = st.sidebar.radio("Selecciona el tipo de análisis:",
 # MÓDULO 1 — ENCUESTA
 # ════════════════════════════════════════════════════════════════
 if modo == "📋 Encuesta":
-    st.header("Módulo de Encuesta")
-    if "resultados_encuesta" not in st.session_state:
-        st.session_state.resultados_encuesta = None
-    if "informe_encuesta" not in st.session_state:
-        st.session_state.informe_encuesta = None
-    if "resultados_encuesta" not in st.session_state:
-        st.session_state.resultados_encuesta = None        
-    if "informe_encuesta" not in st.session_state:
-        st.session_state.informe_encuesta = None
-    st.write("Sube tu Excel con columnas Likert, respuestas abiertas y opcionalmente datos sociodemográficos.")
+    st.header("📋 Módulo de Encuesta")
+    st.markdown("Análisis de encuestas de inversión social — tres grupos: "
+                "**Comunidad**, **Aliados** y **Empresa**.")
 
-    archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
+    def semaforo_likert(valor, escala_max):
+        if pd.isna(valor):
+            return "⬜ Sin dato"
+        if valor >= escala_max * 0.9:
+            return f"🟢 {valor:.2f}"
+        elif valor >= escala_max * 0.67:
+            return f"🟡 {valor:.2f}"
+        return f"🔴 {valor:.2f}"
 
-    if archivo:
-        df = pd.read_excel(archivo)
-        st.subheader("Vista previa de tus datos")
-        st.dataframe(df.head())
+    def semaforo_rating(valor):
+        if pd.isna(valor):
+            return "⬜ Sin dato"
+        if valor >= 4.5:
+            return f"🟢 {valor:.2f}"
+        elif valor >= 3.5:
+            return f"🟡 {valor:.2f}"
+        return f"🔴 {valor:.2f}"
 
-        columnas = list(df.columns)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            cols_likert = st.multiselect("Columnas Likert (numéricas):", columnas)
-        with col2:
-            cols_texto = st.multiselect("Columnas de texto abierto:", columnas)
-        with col3:
-            cols_socio = st.multiselect("Columnas sociodemográficas (opcional):", columnas)
+    def convergencia(rango, escala_max):
+        return "✅ Convergencia" if rango <= (0.5 if escala_max == 3 else 1.0) else "⚠️ Divergencia"
 
-        contexto = st.selectbox("Contexto del análisis:",
-            ["consultoría y diagnóstico organizacional",
-             "bienestar social y desarrollo comunitario",
-             "diagnóstico territorial participativo"])
+    # ── Configuración general ─────────────────────────────────────
+    with st.expander("⚙️ Configuración del análisis", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            org_enc    = st.text_input("Organización ejecutora:", placeholder="Ej: CDC")
+            cli_enc    = st.text_input("Empresa cliente:", placeholder="Ej: Collective Mining")
+            mun_enc    = st.text_input("Municipios / territorios:", placeholder="Ej: Marmato y Supía")
+            per_enc    = st.text_input("Período de evaluación:", placeholder="Ej: Primer semestre 2026")
+        with c2:
+            esc_enc    = st.radio("Escala Likert:", ["1 a 3","1 a 5"], horizontal=True)
+            esc_max    = 3 if esc_enc == "1 a 3" else 5
+            st.caption(f"🟢 ≥{esc_max*0.9:.1f} | 🟡 {esc_max*0.67:.1f}–{esc_max*0.9-0.01:.2f} | 🔴 <{esc_max*0.67:.1f}")
+            proy_txt   = st.text_area("Lista de proyectos (uno por línea):", height=115,
+                                      placeholder="Proyecto Acueducto\nProyecto Educación\n...")
+            proy_lista = [p.strip() for p in proy_txt.split("\n") if p.strip()]
 
-        if cols_texto and st.button("▶ Analizar"):
-            with st.spinner("Procesando con modelo semántico..."):
-                df["texto_unido"] = df[cols_texto].fillna("").apply(
-                    lambda row: " ".join(str(v) for v in row if v != ""), axis=1)
-                textos = df["texto_unido"].tolist()
-                vectores = modelo.encode(textos, show_progress_bar=False)
+    # ── Carga de archivos ─────────────────────────────────────────
+    st.subheader("📂 Carga de archivos")
+    st.info("Puedes subir uno, dos o los tres archivos. El análisis se adapta a lo disponible.")
+    cf1, cf2, cf3 = st.columns(3)
+    with cf1:
+        arc_com = st.file_uploader("👥 Comunidad",  type=["xlsx"], key="f_com")
+    with cf2:
+        arc_ali = st.file_uploader("🤝 Aliados",    type=["xlsx"], key="f_ali")
+    with cf3:
+        arc_emp = st.file_uploader("🏢 Empresa",    type=["xlsx"], key="f_emp")
 
-                n_opt = encontrar_clusters_optimos(vectores)
-                st.info(f"📊 Número óptimo de grupos detectado: **{n_opt}**")
+    arcs = {"Comunidad": arc_com, "Aliados": arc_ali, "Empresa": arc_emp}
+    arcs_act = {k: v for k, v in arcs.items() if v is not None}
 
-                kmeans = KMeans(n_clusters=n_opt, random_state=42, n_init=10)
-                df["cluster_num"] = kmeans.fit_predict(vectores)
+    if arcs_act:
+        dfs_ok = {}
+        for gr, arc in arcs_act.items():
+            try:
+                dfs_ok[gr] = pd.read_excel(arc)
+            except Exception as e_r:
+                st.error(f"Error leyendo {gr}: {e_r}")
 
-                centroides = kmeans.cluster_centers_
-                sims = cosine_similarity(vectores, centroides)
-                df["peso_semantico"] = sims.max(axis=1).round(3)
-                df["peso_ponderado"] = (df["peso_semantico"] / df.groupby("cluster_num")["peso_semantico"].transform("sum")).round(3)
+        if dfs_ok:
+            cols_ref = list(dfs_ok[list(dfs_ok.keys())[0]].columns)
 
-                frases_por_grupo = {}
-                for g in range(n_opt):
-                    frases_por_grupo[g] = df[df["cluster_num"] == g]["texto_unido"].tolist()
+            # ── Configuración de columnas ─────────────────────────
+            st.subheader("🗂️ Configuración de columnas")
+            opc_proy  = ["(sin columna de proyecto)"] + cols_ref
+            col_proy  = st.selectbox("Columna que identifica el proyecto:", opc_proy)
+            col_proy  = None if col_proy.startswith("(sin") else col_proy
+            cm1, cm2  = st.columns(2)
+            with cm1:
+                cols_lk  = st.multiselect("Columnas Likert (numéricas):", cols_ref)
+                col_cal  = st.selectbox("Calificación 1-5 (si existe):",
+                                        ["(ninguna)"] + cols_ref)
+                col_cal  = None if col_cal == "(ninguna)" else col_cal
+            with cm2:
+                cols_sn  = st.multiselect("Columnas Sí / No:", cols_ref)
+                cols_txt = st.multiselect("Columnas texto abierto:", cols_ref)
 
-            with st.spinner("Etiquetando grupos con IA..."):
-                etiquetas = etiquetar_grupos_ia(frases_por_grupo, contexto)
-                df["cluster"] = df["cluster_num"].map(etiquetas)
-                if len(vectores) >= 10:
-                    umap_model = UMAP(n_components=2, random_state=42)
-                    coords = umap_model.fit_transform(vectores)
-                    df["x"] = coords[:, 0]
-                    df["y"] = coords[:, 1]
-                else:
-                    df["x"] = np.random.rand(len(vectores))
-                    df["y"] = np.random.rand(len(vectores))
+            # ── Fase 1: Validación ────────────────────────────────
+            st.subheader("📋 Fase 1 — Validación de datos")
+            if st.button("🔍 Validar datos"):
+                st.session_state["enc_fase1_ok"] = False
+                resumen_val = []
+                for gr_v, df_v in dfs_ok.items():
+                    alertas_v = []
+                    for cl_v in cols_lk:
+                        if cl_v in df_v.columns:
+                            col_num_v = pd.to_numeric(df_v[cl_v], errors="coerce")
+                            no_num_v  = col_num_v.isna().sum() - df_v[cl_v].isna().sum()
+                            if no_num_v > 0:
+                                alertas_v.append(f"'{cl_v}': {no_num_v} no numéricos")
+                            fuera_v = ((col_num_v < 1)|(col_num_v > esc_max)).sum()
+                            if fuera_v > 0:
+                                alertas_v.append(f"'{cl_v}': {fuera_v} fuera de 1-{esc_max}")
+                    pdet = {}
+                    if col_proy and col_proy in df_v.columns:
+                        pdet = df_v[col_proy].value_counts().to_dict()
+                        if gr_v == "Aliados":
+                            posibles_id = [c for c in df_v.columns
+                                           if any(x in c.lower()
+                                                  for x in ["nombre","respondente","id","persona"])]
+                            if posibles_id:
+                                n_pers = df_v[posibles_id[0]].nunique()
+                                st.info(f"ℹ️ **Aliados:** {n_pers} personas únicas, "
+                                        f"{len(df_v)} evaluaciones (col: '{posibles_id[0]}')")
+                        if proy_lista and pdet:
+                            det_s = set(str(k).strip() for k in pdet)
+                            esp_s = set(proy_lista)
+                            if det_s - esp_s:
+                                st.warning(f"**{gr_v}** — En datos pero no en lista: "
+                                           f"{', '.join(det_s - esp_s)}")
+                            if esp_s - det_s:
+                                st.warning(f"**{gr_v}** — En lista pero sin datos: "
+                                           f"{', '.join(esp_s - det_s)}")
+                        if pdet:
+                            st.write(f"**{gr_v} — Proyectos detectados:**")
+                            st.dataframe(pd.DataFrame(list(pdet.items()),
+                                         columns=["Proyecto", f"Filas ({gr_v})"]),
+                                         use_container_width=True)
+                    resumen_val.append({
+                        "Grupo": gr_v,
+                        "Filas": len(df_v),
+                        "Proyectos": len(pdet) if pdet else "N/A",
+                        "Alertas": "; ".join(alertas_v) if alertas_v else "✅ Sin alertas"
+                    })
+                st.dataframe(pd.DataFrame(resumen_val), use_container_width=True)
+                st.session_state["enc_fase1_ok"] = True
+                st.success("✅ Validación completada. Presiona **▶ Analizar encuestas** para continuar.")
 
-            st.session_state.resultados_encuesta = df
-            st.session_state.informe_encuesta = None
-            st.success("Análisis completado.")
-            st.session_state.resultados_enc = df
-            st.session_state.resultados_encuesta = df
-            st.subheader("🔎 Detección de subregistro")
-            for a in detectar_subregistro(df, cols_texto):
-                st.write(a)
+            # ── Fases 2-3-4: Análisis ─────────────────────────────
+            if st.session_state.get("enc_fase1_ok"):
+                contexto_enc = st.selectbox("Contexto del análisis:",
+                    ["evaluación de inversión social y desarrollo comunitario",
+                     "consultoría y diagnóstico organizacional",
+                     "diagnóstico territorial participativo"])
 
-            grupos_disponibles = sorted(df["cluster"].unique())
-            grupo_sel = st.multiselect("Filtrar por grupo:", grupos_disponibles, default=grupos_disponibles)
-            df_filtrado = df[df["cluster"].isin(grupo_sel)]
+                if st.button("▶ Analizar encuestas"):
+                    # Determinar proyectos
+                    todos_proy = set()
+                    for gr_p, df_p in dfs_ok.items():
+                        if col_proy and col_proy in df_p.columns:
+                            todos_proy.update(df_p[col_proy].dropna().astype(str)
+                                             .str.strip().unique())
+                    if not todos_proy and proy_lista:
+                        todos_proy = set(proy_lista)
+                    proyectos_a = sorted(todos_proy) if todos_proy else ["(análisis global)"]
 
-            st.subheader("Mapa semántico de respuestas")
-            fig = px.scatter(df_filtrado, x="x", y="y", color="cluster",
-                           hover_data=cols_texto + ["peso_semantico"],
-                           title="Agrupación semántica de respuestas")
-            st.plotly_chart(fig, use_container_width=True)
+                    filas_consolidado, filas_acuerdo = [], []
+                    filas_sino, filas_cal, filas_tri = [], [], []
+                    filas_cual, sin_clasificar_enc   = [], []
 
-            st.subheader("📊 Distribución de grupos")
-            conteo = df_filtrado["cluster"].value_counts().reset_index()
-            conteo.columns = ["Grupo", "Cantidad"]
-            conteo["Porcentaje"] = (conteo["Cantidad"] / conteo["Cantidad"].sum() * 100).round(1)
-            col1, col2 = st.columns(2)
-            with col1:
-                fig_t = px.pie(conteo, names="Grupo", values="Cantidad", title="Porcentaje por grupo", hole=0.3)
-                st.plotly_chart(fig_t, use_container_width=True)
-            with col2:
-                fig_b = px.bar(conteo, x="Grupo", y="Porcentaje", text="Porcentaje",
-                              color="Grupo", title="Porcentaje por grupo (%)")
-                fig_b.update_traces(texttemplate="%{text}%", textposition="outside")
-                st.plotly_chart(fig_b, use_container_width=True)
+                    # ── Fase 2: Likert ────────────────────────────
+                    if cols_lk:
+                        st.subheader("📊 Fase 2 — Análisis Likert por proyecto")
+                        for proy in proyectos_a:
+                            fila_c  = {"Proyecto": proy}
+                            fila_ac = {"Proyecto": proy}
+                            for cl in cols_lk:
+                                for gr, df_g in dfs_ok.items():
+                                    if cl not in df_g.columns:
+                                        continue
+                                    if col_proy and col_proy in df_g.columns:
+                                        sub = pd.to_numeric(
+                                            df_g[df_g[col_proy].astype(str).str.strip()==proy][cl],
+                                            errors="coerce").dropna()
+                                    else:
+                                        sub = pd.to_numeric(df_g[cl],errors="coerce").dropna()
+                                    if len(sub) > 0:
+                                        av  = " ⚠️indiv." if len(sub)<=2 else ""
+                                        fila_c[f"{cl} | {gr} (n={len(sub)}{av})"] = semaforo_likert(sub.mean(),esc_max)
+                                        fila_ac[f"{cl} | {gr}"] = f"{(sub==esc_max).mean()*100:.0f}%"
+                            filas_consolidado.append(fila_c)
+                            filas_acuerdo.append(fila_ac)
 
-            if cols_likert:
-                st.subheader("Promedio Likert por grupo")
-                resumen_lk = df_filtrado.groupby("cluster")[cols_likert].mean().round(2)
-                fig_lk = px.imshow(resumen_lk, text_auto=True, color_continuous_scale="RdYlGn",
-                                  title="Mapa de calor: Likert por grupo")
-                st.plotly_chart(fig_lk, use_container_width=True)
+                        st.caption("🟢 Destacado | 🟡 Aceptable | 🔴 Crítico | ⚠️indiv. = n≤2")
+                        st.dataframe(pd.DataFrame(filas_consolidado), use_container_width=True)
+                        st.write("**% de acuerdo** (respuestas con valor máximo):")
+                        st.dataframe(pd.DataFrame(filas_acuerdo), use_container_width=True)
 
-            if cols_socio:
-                st.subheader("👥 Participación sociodemográfica")
-                for col_s in cols_socio:
-                    if col_s in df_filtrado.columns:
-                        conteo_s = df_filtrado[col_s].value_counts().reset_index()
-                        conteo_s.columns = [col_s, "Cantidad"]
-                        fig_s = px.bar(conteo_s, x=col_s, y="Cantidad", color=col_s,
-                                      title=f"Participación por {col_s}")
-                        st.plotly_chart(fig_s, use_container_width=True)
-                        cruce = df_filtrado.groupby(["cluster", col_s]).size().reset_index(name="n")
-                        fig_cruce = px.bar(cruce, x="cluster", y="n", color=col_s, barmode="group",
-                                          title=f"Grupos semánticos por {col_s}")
-                        st.plotly_chart(fig_cruce, use_container_width=True)
+                        # Heatmap
+                        filas_hm = []
+                        for proy in proyectos_a:
+                            for cl in cols_lk:
+                                for gr, df_g in dfs_ok.items():
+                                    if cl not in df_g.columns:
+                                        continue
+                                    if col_proy and col_proy in df_g.columns:
+                                        sub_hm = pd.to_numeric(
+                                            df_g[df_g[col_proy].astype(str).str.strip()==proy][cl],
+                                            errors="coerce").dropna()
+                                    else:
+                                        sub_hm = pd.to_numeric(df_g[cl],errors="coerce").dropna()
+                                    if len(sub_hm)>0:
+                                        filas_hm.append({
+                                            "Proyecto": str(proy)[:35],
+                                            "Indicador": f"{cl} ({gr})",
+                                            "Promedio": round(sub_hm.mean(),2)})
+                        if filas_hm:
+                            df_hm = pd.DataFrame(filas_hm)
+                            piv_hm = df_hm.pivot_table(index="Proyecto",columns="Indicador",
+                                                        values="Promedio")
+                            fig_hm = px.imshow(piv_hm,color_continuous_scale="RdYlGn",
+                                              zmin=1,zmax=esc_max,text_auto=".2f",
+                                              title="Mapa de calor — Promedios Likert",
+                                              aspect="auto")
+                            st.plotly_chart(fig_hm, use_container_width=True)
 
-            st.subheader("🗂️ Categorización de hallazgos")
-            with st.spinner("Categorizando con IA..."):
-                cat = categorizar_hallazgos(df_filtrado["texto_unido"].tolist(), contexto)
-            st.markdown(cat)
+                    # ── Fase 2: Sí/No ─────────────────────────────
+                    if cols_sn:
+                        st.subheader("✅ Preguntas Sí / No")
+                        for proy in proyectos_a:
+                            fila_sn = {"Proyecto": proy}
+                            for cs in cols_sn:
+                                for gr, df_g in dfs_ok.items():
+                                    if cs not in df_g.columns:
+                                        continue
+                                    if col_proy and col_proy in df_g.columns:
+                                        sub_sn = df_g[df_g[col_proy].astype(str).str.strip()==proy][cs].dropna()
+                                    else:
+                                        sub_sn = df_g[cs].dropna()
+                                    if len(sub_sn)>0:
+                                        pct_si = sub_sn.apply(
+                                            lambda x: 1 if str(x).strip().lower()
+                                            in ["sí","si","s","1","true","yes"] else 0
+                                        ).mean()*100
+                                        fila_sn[f"{cs} | {gr}"] = f"{pct_si:.0f}% Sí (n={len(sub_sn)})"
+                            filas_sino.append(fila_sn)
+                        st.dataframe(pd.DataFrame(filas_sino), use_container_width=True)
 
-            st.subheader("📋 Resumen ejecutivo por grupo")
-            resumen_exec = df_filtrado.groupby("cluster").agg(
-                Cantidad=("cluster", "count"),
-                Cohesion=("peso_semantico", "mean")
-            ).round(3).reset_index()
-            resumen_exec["Porcentaje"] = (resumen_exec["Cantidad"] / resumen_exec["Cantidad"].sum() * 100).round(1).astype(str) + "%"
-            resumen_exec.columns = ["Grupo", "Respuestas", "Cohesión semántica", "Porcentaje"]
-            st.dataframe(resumen_exec, use_container_width=True)
+                    # ── Fase 2: Calificación 1-5 ──────────────────
+                    if col_cal:
+                        st.subheader("⭐ Calificación general 1-5")
+                        for proy in proyectos_a:
+                            fila_cal = {"Proyecto": proy}
+                            for gr, df_g in dfs_ok.items():
+                                if col_cal not in df_g.columns:
+                                    continue
+                                if col_proy and col_proy in df_g.columns:
+                                    sub_cal = pd.to_numeric(
+                                        df_g[df_g[col_proy].astype(str).str.strip()==proy][col_cal],
+                                        errors="coerce").dropna()
+                                else:
+                                    sub_cal = pd.to_numeric(df_g[col_cal],errors="coerce").dropna()
+                                if len(sub_cal)>0:
+                                    av = " ⚠️indiv." if len(sub_cal)<=2 else ""
+                                    fila_cal[f"Calificación | {gr} (n={len(sub_cal)}{av})"] = semaforo_rating(sub_cal.mean())
+                            filas_cal.append(fila_cal)
+                        st.dataframe(pd.DataFrame(filas_cal), use_container_width=True)
 
-            st.subheader("⚖️ Frecuencia simple vs. ponderada")
-            pond = df_filtrado.groupby("cluster").agg(
-                Frecuencia_simple=("cluster", "count"),
-                Peso_ponderado=("peso_ponderado", "sum")
-            ).round(3).reset_index()
-            fig_pond = px.bar(pond, x="cluster", y=["Frecuencia_simple", "Peso_ponderado"],
-                             barmode="group", title="Frecuencia simple vs. ponderada")
-            st.plotly_chart(fig_pond, use_container_width=True)
+                    # ── Fase 3: Triangulación ─────────────────────
+                    if cols_lk and len(dfs_ok)>=2:
+                        st.subheader("🔺 Fase 3 — Triangulación entre grupos")
+                        umbral_t = 0.5 if esc_max==3 else 1.0
+                        st.caption(f"Convergencia = diferencia ≤ {umbral_t}")
+                        for proy in proyectos_a:
+                            for cl in cols_lk:
+                                vals_t = {}
+                                for gr, df_g in dfs_ok.items():
+                                    if cl not in df_g.columns:
+                                        continue
+                                    if col_proy and col_proy in df_g.columns:
+                                        sub_t = pd.to_numeric(
+                                            df_g[df_g[col_proy].astype(str).str.strip()==proy][cl],
+                                            errors="coerce").dropna()
+                                    else:
+                                        sub_t = pd.to_numeric(df_g[cl],errors="coerce").dropna()
+                                    if len(sub_t)>0:
+                                        vals_t[gr] = round(sub_t.mean(),2)
+                                if len(vals_t)>=2:
+                                    rng_t = max(vals_t.values())-min(vals_t.values())
+                                    filas_tri.append({
+                                        "Proyecto": proy,"Indicador": cl,
+                                        "Comunidad": vals_t.get("Comunidad","Sin dato"),
+                                        "Aliados":   vals_t.get("Aliados","Sin dato"),
+                                        "Empresa":   vals_t.get("Empresa","Sin dato"),
+                                        "Rango MAX-MIN": round(rng_t,2),
+                                        "Resultado": convergencia(rng_t,esc_max)})
+                        if filas_tri:
+                            df_tri_enc = pd.DataFrame(filas_tri)
+                            st.dataframe(df_tri_enc, use_container_width=True)
+                            n_div = df_tri_enc["Resultado"].str.contains("Divergencia").sum()
+                            if n_div>0:
+                                st.warning(f"⚠️ {n_div} divergencias detectadas.")
+                        else:
+                            st.info("No hay suficientes grupos con datos en común para triangular.")
 
-            st.subheader("💬 Frases más representativas por grupo")
-            for grupo in grupos_disponibles:
-                if grupo in grupo_sel:
-                    with st.expander(f"📌 {grupo}"):
-                        top = df_filtrado[df_filtrado["cluster"] == grupo].nlargest(3, "peso_semantico")
-                        for _, row in top.iterrows():
-                            for col in cols_texto:
-                                st.write(f"• {row[col]}")
+                    # ── Fase 3: Cualitativo ───────────────────────
+                    if cols_txt:
+                        st.subheader("💬 Fase 3 — Análisis cualitativo")
+                        for gr, df_g in dfs_ok.items():
+                            for ct in cols_txt:
+                                if ct not in df_g.columns:
+                                    continue
+                                for _, row_ct in df_g.iterrows():
+                                    txt_ct = str(row_ct.get(ct,""))
+                                    if not txt_ct or txt_ct=="nan" or len(txt_ct.strip())<3:
+                                        continue
+                                    temas_ct = clasificar_texto_enc(txt_ct)
+                                    proy_ct  = "N/A"
+                                    if col_proy and col_proy in df_g.columns:
+                                        proy_ct = str(row_ct.get(col_proy,""))
+                                    for tema_ct in temas_ct:
+                                        filas_cual.append({
+                                            "Grupo": gr,"Proyecto": proy_ct,
+                                            "Columna": ct,"Tema": tema_ct,
+                                            "Texto": txt_ct[:150]})
+                                    if "Sin clasificar" in temas_ct:
+                                        sin_clasificar_enc.append({
+                                            "Grupo":gr,"Columna":ct,"Texto":txt_ct})
 
-            st.subheader("📄 Informe ejecutivo generado por IA")
-            resumen_para_ia = f"Contexto: {contexto}\nTotal participantes: {len(df_filtrado)}\nGrupos: {n_opt}\n"
-            for grupo in grupos_disponibles:
-                if grupo in grupo_sel:
-                    top = df_filtrado[df_filtrado["cluster"] == grupo].nlargest(2, "peso_semantico")
-                    resumen_para_ia += f"\n{grupo}:\n"
-                    for _, row in top.iterrows():
-                        resumen_para_ia += f"  - {row['texto_unido']}\n"
-            with st.spinner("Generando informe con IA..."):
-                informe = generar_informe_ia(resumen_para_ia, contexto)
-                st.session_state.informe_enc = informa
-            st.markdown(informe)
+                        if filas_cual:
+                            df_cual = pd.DataFrame(filas_cual)
+                            top_temas = (df_cual[df_cual["Tema"]!="Sin clasificar"]
+                                        ["Tema"].value_counts().head(12).reset_index())
+                            top_temas.columns = ["Tema","Frecuencia"]
+                            fig_t = px.bar(top_temas, x="Frecuencia", y="Tema",
+                                          orientation="h",
+                                          title="Temas más frecuentes en respuestas abiertas",
+                                          color="Frecuencia",color_continuous_scale="Blues")
+                            fig_t.update_layout(yaxis=dict(autorange="reversed"))
+                            st.plotly_chart(fig_t, use_container_width=True)
+                            if sin_clasificar_enc:
+                                with st.expander(f"⚠️ {len(sin_clasificar_enc)} respuestas Sin clasificar"):
+                                    st.dataframe(pd.DataFrame(sin_clasificar_enc),
+                                                 use_container_width=True)
 
-            st.subheader("⬇ Descargas")
-            col1, col2 = st.columns(2)
-            with col1:
-                buffer_enc = io.BytesIO()
-                df_filtrado.to_excel(buffer_enc, index=False, engine="openpyxl")
-                buffer_enc.seek(0)
-                st.download_button(
-                    "⬇ Descargar datos Excel",
-                    data=buffer_enc,
-                    file_name="resultados_encuesta.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="descarga_encuesta"
-                )
-            with col2:
-                st.download_button(
-                    "⬇ Descargar informe TXT",
-                    data=informe.encode("utf-8"),
-                    file_name="informe_ejecutivo.txt",
-                    key="descarga_informe_encuesta"
-                )
+                    # ── Fase 4: Informe IA ────────────────────────
+                    st.subheader("📄 Fase 4 — Informe ejecutivo IA")
+                    resumen_ia = (f"Organización: {org_enc} | Cliente: {cli_enc}\n"
+                                  f"Municipios: {mun_enc} | Período: {per_enc}\n"
+                                  f"Grupos: {', '.join(dfs_ok.keys())}\n"
+                                  f"Proyectos: {', '.join(str(p) for p in proyectos_a[:15])}\n")
+                    if filas_consolidado:
+                        resumen_ia += f"\nPromedios Likert:\n{pd.DataFrame(filas_consolidado).to_string(index=False)}\n"
+                    if filas_tri:
+                        n_div_ia = sum(1 for f in filas_tri if "Divergencia" in str(f.get("Resultado","")))
+                        resumen_ia += f"\nTriangulación: {len(filas_tri)} cruces, {n_div_ia} divergencias.\n"
+                    if filas_cual:
+                        top_t_ia = (pd.DataFrame(filas_cual)[pd.DataFrame(filas_cual)["Tema"]!="Sin clasificar"]
+                                    ["Tema"].value_counts().head(5).index.tolist())
+                        resumen_ia += f"\nTemas principales: {', '.join(top_t_ia)}\n"
+
+                    with st.spinner("Generando informe con IA..."):
+                        informe_enc = generar_informe_ia(resumen_ia, contexto_enc)
+                        st.session_state.informe_enc = informe_enc
+                    st.markdown(informe_enc)
+
+                    # ── Descarga Excel con fórmulas ───────────────
+                    st.subheader("⬇ Descargas")
+                    cfg_dict = {
+                        "organizacion": org_enc, "cliente": cli_enc,
+                        "municipios": mun_enc,   "periodo": per_enc,
+                        "escala_max": esc_max,   "col_proyecto": col_proy,
+                        "cols_likert": cols_lk,  "cols_sino": cols_sn,
+                        "col_cal": col_cal,      "cols_texto": cols_txt,
+                        "proyectos_lista": proyectos_a,
+                    }
+                    res_dict = {
+                        "filas_consolidado": filas_consolidado,
+                        "filas_tri": filas_tri,
+                        "filas_cual": filas_cual,
+                        "sin_clasificar": sin_clasificar_enc,
+                    }
+
+                    with st.spinner("Construyendo Excel con fórmulas..."):
+                        wb_enc = crear_excel_encuesta_formulas(dfs_ok, cfg_dict, res_dict)
+                        buf_enc = io.BytesIO()
+                        wb_enc.save(buf_enc)
+                        buf_enc.seek(0)
+
+                    cd1, cd2 = st.columns(2)
+                    with cd1:
+                        st.download_button(
+                            "⬇ Descargar Excel con fórmulas",
+                            data=buf_enc,
+                            file_name="analisis_encuestas.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dl_enc_xlsx")
+                    with cd2:
+                        if st.session_state.get("informe_enc"):
+                            st.download_button(
+                                "⬇ Descargar informe TXT",
+                                data=st.session_state.informe_enc.encode("utf-8"),
+                                file_name="informe_encuestas.txt",
+                                key="dl_enc_txt")
+    else:
+        st.info("👆 Sube al menos un archivo de encuesta para comenzar.")
+
 
 # ════════════════════════════════════════════════════════════════
 # MÓDULO 2 — CARTOGRAFÍA SOCIAL
 # ════════════════════════════════════════════════════════════════
 elif modo == "🗺️ Cartografía Social":
     st.header("Módulo de Cartografía Social")
-    st.write("Sube tu Excel con columnas: año, semestre, municipio, vereda, participantes, componentes y lineas de inversion.")
+    st.write("Sube tu Excel con columnas: año, semestre, municipio, vereda, "
+             "participantes, componentes y lineas de inversion.")
 
     archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx"])
 
     if archivo:
-        import hashlib
-        archivo_hash = hashlib.md5(archivo.read()).hexdigest()
-        archivo.seek(0)
+        archivo_hash = md5_archivo(archivo)
         df = pd.read_excel(archivo)
         df.columns = [c.strip().lower() for c in df.columns]
         st.subheader("Vista previa de tus datos")
         st.dataframe(df.head())
 
         columnas = list(df.columns)
+        fila_config = df.iloc[0]
+        df = df.iloc[1:].reset_index(drop=True)
 
-        # ── COLUMNAS FIJAS ────────────────────────────────────────
-        # ── LEER CONFIGURACIÓN DESDE FILA 2 ──────────────────────
-        fila_config = df.iloc[0]  # fila 2 del Excel = fila 0 del dataframe
-        df = df.iloc[1:].reset_index(drop=True)  # eliminar fila de configuración
-
-        cols_meta = [c for c in columnas if str(fila_config[c]).strip().lower() == "meta"]
-        col_lineas_list = [c for c in columnas if str(fila_config[c]).strip().lower() == "lineas"]
-        col_lineas = col_lineas_list[0] if col_lineas_list else "lineas de inversion"
-        cols_componentes_default = [c for c in columnas if str(fila_config[c]).strip().lower() == "componente"]
+        cols_meta      = [c for c in columnas if str(fila_config[c]).strip().lower()=="meta"]
+        col_lineas_lst = [c for c in columnas if str(fila_config[c]).strip().lower()=="lineas"]
+        col_lineas     = col_lineas_lst[0] if col_lineas_lst else "lineas de inversion"
+        cols_comp_def  = [c for c in columnas if str(fila_config[c]).strip().lower()=="componente"]
         cols_componentes = st.multiselect("Selecciona los componentes a analizar:",
-                                          cols_componentes_default,
-                                          default=cols_componentes_default)
-
+                                          cols_comp_def, default=cols_comp_def)
         contexto = st.selectbox("Contexto del análisis:",
             ["consultoría y diagnóstico organizacional",
              "bienestar social y desarrollo comunitario",
              "diagnóstico territorial participativo"])
 
         cache_key = f"{archivo_hash}_{','.join(sorted(cols_componentes))}_{contexto}"
-        if cols_componentes and st.button("▶ Analizar"):
-            usar_cache = (
-                st.session_state.get("cache_key_saved") == cache_key and
-                st.session_state.get("cache_result_cart") is not None
-            )
-            if not usar_cache:
-                # Intentar cargar desde GitHub
-                with st.spinner("Buscando análisis previo guardado..."):
-                    df_github = cargar_resultado_github(archivo_hash)
-                if df_github is not None:
-                    st.info("✅ Análisis previo encontrado — cargando resultados guardados.")
-                    df_result = df_github
-                    st.session_state.cache_result_cart = df_result
-                    st.session_state.cache_key_saved = cache_key
-                    usar_cache = True
-            if usar_cache and st.session_state.get("cache_result_cart") is not None:
-                st.info("✅ Mismos datos detectados — usando resultados anteriores.")
-                df_result = st.session_state.cache_result_cart
-                total_participantes = pd.to_numeric(df.get("participantes", pd.Series([0])), errors="coerce").sum() if "participantes" in df.columns else 0
-            else:
 
-                # ── PARTICIPANTES ─────────────────────────────────────
+        if cols_componentes and st.button("▶ Analizar"):
+            # ── NIVEL 1: Caché en sesión (instantáneo) ────────────
+            en_sesion = (st.session_state.get("cache_key_saved") == cache_key and
+                         st.session_state.get("cache_result_cart") is not None)
+
+            # ── NIVEL 2: Caché en GitHub (entre sesiones) ─────────
+            en_github = False
+            if not en_sesion:
+                with st.spinner("Buscando análisis guardado en GitHub..."):
+                    datos_gh = leer_cache_github(archivo_hash)
+                if datos_gh is not None:
+                    try:
+                        df_result = cache_a_df(datos_gh["df_result"])
+                        st.session_state.cache_result_cart = df_result
+                        st.session_state.cache_key_saved   = cache_key
+                        st.session_state.cache_cat_cart    = datos_gh["cat_comp"]
+                        st.session_state.cache_cat_vereda  = datos_gh["cat_ver"]
+                        en_github = True
+                    except Exception:
+                        en_github = False
+
+            if en_sesion:
+                st.info("✅ Mismos datos (sesión activa) — resultados instantáneos.")
+                df_result = st.session_state.cache_result_cart
+                total_participantes = (pd.to_numeric(df["participantes"],errors="coerce").sum()
+                                       if "participantes" in df.columns else 0)
+            elif en_github:
+                st.info("✅ Análisis encontrado en GitHub — cargando resultados guardados.")
+                total_participantes = (pd.to_numeric(df["participantes"],errors="coerce").sum()
+                                       if "participantes" in df.columns else 0)
+            else:
                 total_participantes = 0
                 if "participantes" in df.columns:
-                    total_participantes = pd.to_numeric(df["participantes"], errors="coerce").sum()
+                    total_participantes = pd.to_numeric(df["participantes"],errors="coerce").sum()
                     st.metric("👥 Total participantes", int(total_participantes))
 
-                # ── PARTICIPACIÓN TERRITORIAL ─────────────────────────
                 if "municipio" in df.columns and "vereda" in df.columns:
                     st.subheader("🗺️ Participación territorial")
-                    part_muni = df.groupby("municipio")["participantes"].apply(
-                        lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
-                    part_muni.columns = ["Municipio", "Participantes"]
-                    fig_muni = px.bar(part_muni, x="Municipio", y="Participantes",
-                                     color="Municipio", title="Participantes por municipio")
-                    st.plotly_chart(fig_muni, use_container_width=True)
-
-                    part_vereda = df.groupby(["municipio", "vereda"])["participantes"].apply(
-                        lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
-                    part_vereda.columns = ["Municipio", "Vereda", "Participantes"]
-                    fig_vereda = px.bar(part_vereda, x="Vereda", y="Participantes",
-                                       color="Municipio", title="Participantes por vereda")
-                    st.plotly_chart(fig_vereda, use_container_width=True)
-
-                    # ── GRÁFICOS AÑO Y SEMESTRE ───────────────────
+                    pm = df.groupby("municipio")["participantes"].apply(
+                        lambda x: pd.to_numeric(x,errors="coerce").sum()).reset_index()
+                    pm.columns = ["Municipio","Participantes"]
+                    st.plotly_chart(px.bar(pm,x="Municipio",y="Participantes",
+                                          color="Municipio",title="Participantes por municipio"),
+                                   use_container_width=True)
+                    pv = df.groupby(["municipio","vereda"])["participantes"].apply(
+                        lambda x: pd.to_numeric(x,errors="coerce").sum()).reset_index()
+                    pv.columns = ["Municipio","Vereda","Participantes"]
+                    st.plotly_chart(px.bar(pv,x="Vereda",y="Participantes",
+                                          color="Municipio",title="Participantes por vereda"),
+                                   use_container_width=True)
                     if "año" in df.columns:
-                        df["año"] = pd.to_numeric(df["año"], errors="coerce").fillna(0).astype(int).astype(str)
-                        df["año"] = df["año"].replace("0", "")
-                        part_año = df.groupby("año")["participantes"].apply(
-                            lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
-                        part_año.columns = ["Año", "Participantes"]
-                        fig_año = px.bar(part_año, x="Año", y="Participantes",
-                                        color="Año", title="Participantes por año")
-                        fig_año.update_xaxes(type="category")
-                        st.plotly_chart(fig_año, use_container_width=True)
-
+                        df["año"] = df["año"].astype(str).str.replace(".0","",regex=False)
+                        pa = df.groupby("año")["participantes"].apply(
+                            lambda x: pd.to_numeric(x,errors="coerce").sum()).reset_index()
+                        pa.columns = ["Año","Participantes"]
+                        st.plotly_chart(px.bar(pa,x="Año",y="Participantes",
+                                              color="Año",title="Participantes por año",
+                                              category_orders={"Año":sorted(pa["Año"].unique())}),
+                                       use_container_width=True)
                     if "semestre" in df.columns:
-                        df["semestre"] = pd.to_numeric(df["semestre"], errors="coerce").fillna(0).astype(int).astype(str)
-                        df["semestre"] = df["semestre"].replace("0", "")
-                        part_sem = df.groupby("semestre")["participantes"].apply(
-                            lambda x: pd.to_numeric(x, errors="coerce").sum()).reset_index()
-                        part_sem.columns = ["Semestre", "Participantes"]
-                        fig_sem = px.bar(part_sem, x="Semestre", y="Participantes",
-                                        color="Semestre", title="Participantes por semestre")
-                        fig_sem.update_xaxes(type="category")
-                        st.plotly_chart(fig_sem, use_container_width=True)
-                        
-                with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
+                        ps = df.groupby("semestre")["participantes"].apply(
+                            lambda x: pd.to_numeric(x,errors="coerce").sum()).reset_index()
+                        ps.columns = ["Semestre","Participantes"]
+                        st.plotly_chart(px.bar(ps,x="Semestre",y="Participantes",
+                                              color="Semestre",title="Participantes por semestre"),
+                                       use_container_width=True)
 
-                    # ── FRAGMENTAR FRASES ─────────────────────────────
+                with st.spinner("Fragmentando frases y procesando con el modelo semántico..."):
                     registros = []
                     for _, fila in df.iterrows():
-                        lineas_celda = str(fila.get(col_lineas, "")).split(",") if col_lineas in df.columns else []
-                        lineas_celda = [l.strip() for l in lineas_celda if l.strip()]
-
+                        lineas_c = (str(fila.get(col_lineas,"")).split(",")
+                                    if col_lineas in df.columns else [])
+                        lineas_c = [l.strip() for l in lineas_c if l.strip()]
                         for comp in cols_componentes:
-                            celda = str(fila.get(comp, ""))
+                            celda = str(fila.get(comp,""))
                             if celda and celda != "nan":
-                                frases = [f.strip() for f in celda.split(".") if len(f.strip()) > 5]
+                                frases = [f.strip() for f in celda.split(".") if len(f.strip())>5]
                                 for frase in frases:
-                                    registro = {
-                                        "componente": comp,
-                                        "frase": frase,
-                                        "lineas_disponibles": lineas_celda
-                                    }
-                                    for col_m in cols_meta:
-                                        registro[col_m] = fila.get(col_m, "")
-                                    registros.append(registro)
+                                    reg = {"componente": comp, "frase": frase,
+                                           "lineas_disponibles": lineas_c}
+                                    for cm in cols_meta:
+                                        reg[cm] = fila.get(cm,"")
+                                    registros.append(reg)
 
                     df_frases = pd.DataFrame(registros)
                     st.write(f"Total de frases extraídas: {len(df_frases)}")
+                    textos_l = df_frases["frase"].tolist()
+                    vectores = np.array(modelo.encode(textos_l,show_progress_bar=False,batch_size=16))
 
-                    textos_lista = df_frases["frase"].tolist()
-                    vectores = np.array(modelo.encode(textos_lista, show_progress_bar=False, batch_size=16))
-
-                    # ── CLUSTERING POR COMPONENTE ─────────────────────
                     resultados = []
                     for comp in cols_componentes:
-                        mask = df_frases["componente"] == comp
-                        vecs_comp = vectores[mask]
-                        subset = df_frases[mask].reset_index(drop=True)
-
-                        if len(subset) >= 4:
-                            n_opt = encontrar_clusters_optimos(vecs_comp, max_k=min(6, len(subset)-1))
+                        mask = df_frases["componente"]==comp
+                        vc = vectores[mask]
+                        sub = df_frases[mask].reset_index(drop=True)
+                        n_opt = (encontrar_clusters_optimos(vc,max_k=min(6,len(sub)-1))
+                                 if len(sub)>=4 else min(2,len(sub)))
+                        if n_opt>=2:
+                            km = KMeans(n_clusters=n_opt,random_state=42,n_init=10)
+                            clusters = km.fit_predict(vc)
+                            pesos = cosine_similarity(vc,km.cluster_centers_).max(axis=1).round(3)
                         else:
-                            n_opt = min(2, len(subset))
-
-                        if n_opt >= 2:
-                            km = KMeans(n_clusters=n_opt, random_state=42, n_init=10)
-                            clusters = km.fit_predict(vecs_comp)
-                            sims = cosine_similarity(vecs_comp, km.cluster_centers_)
-                            pesos = sims.max(axis=1).round(3)
-                        else:
-                            clusters = [0] * len(subset)
-                            pesos = [1.0] * len(subset)
-
-                        for i, (_, row) in enumerate(subset.iterrows()):
-                            resultado = {
-                                "componente": comp,
-                                "frase": row["frase"],
-                                "grupo_num": clusters[i],
-                                "peso_semantico": pesos[i],
-                                "lineas_disponibles": row["lineas_disponibles"]
-                            }
-                            for col_m in cols_meta:
-                                resultado[col_m] = row.get(col_m, "")
-                            resultados.append(resultado)
+                            clusters = [0]*len(sub)
+                            pesos = [1.0]*len(sub)
+                        for i, (_, row_r) in enumerate(sub.iterrows()):
+                            res = {"componente":comp,"frase":row_r["frase"],
+                                   "grupo_num":clusters[i],"peso_semantico":pesos[i],
+                                   "lineas_disponibles":row_r["lineas_disponibles"]}
+                            for cm in cols_meta:
+                                res[cm] = row_r.get(cm,"")
+                            resultados.append(res)
 
                     df_result = pd.DataFrame(resultados)
 
                 letras = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
                 for comp in cols_componentes:
-                    mask = df_result["componente"] == comp
-                    grupos_unicos = sorted(df_result[mask]["grupo_num"].unique())
-                    mapa = {g: f"Grupo {letras[i]}" for i, g in enumerate(grupos_unicos)}
-                    df_result.loc[mask, "grupo"] = df_result.loc[mask, "grupo_num"].map(mapa)
+                    mask = df_result["componente"]==comp
+                    gu = sorted(df_result[mask]["grupo_num"].unique())
+                    mapa = {g: f"Grupo {letras[i]}" for i,g in enumerate(gu)}
+                    df_result.loc[mask,"grupo"] = df_result.loc[mask,"grupo_num"].map(mapa)
+
                 with st.spinner("Asociando frases a líneas de inversión con IA..."):
+                    ncomp = ["economico","social","ambiental","gobernanza","alianzas",
+                             "proyeccion","governance","económico","proyección"]
                     for comp in cols_componentes:
-                        mask = df_result["componente"] == comp
-                        subset = df_result[mask].reset_index(drop=True)
-                        if len(subset) == 0:
+                        mask = df_result["componente"]==comp
+                        sub  = df_result[mask].reset_index(drop=True)
+                        if len(sub)==0:
                             continue
-
-                        lineas_disponibles = subset.iloc[0]["lineas_disponibles"]
-                        if not lineas_disponibles:
-                            df_result.loc[mask, "lineas_inversion"] = "Sin líneas definidas"
+                        lin_disp = sub.iloc[0]["lineas_disponibles"]
+                        if not lin_disp:
+                            df_result.loc[mask,"lineas_inversion"] = "Sin líneas definidas"
                             continue
-
-                        frases_lote = subset["frase"].tolist()
-                        lineas_str = "\n".join(f"- {l}" for l in lineas_disponibles)
-                        lineas_validas_set = set(l.lower() for l in lineas_disponibles)
-                        nombres_componentes = ["economico", "social", "ambiental", "gobernanza", "alianzas", "proyeccion", "governance", "económico", "proyección"]
-
-                        for inicio in range(0, len(frases_lote), 20):
-                            sublote = frases_lote[inicio:inicio+20]
-                            frases_str = "\n".join(f"{i+1}. {f}" for i, f in enumerate(sublote))
-                            prompt = f"""Eres un experto en desarrollo territorial con profundo conocimiento en Investigación-Acción Participativa (IAP), educación popular y etnografía crítica, en la línea de Orlando Fals Borda y Paulo Freire.
-
-    Estás analizando frases de una cartografía social participativa en el contexto de {contexto}. Esta cartografía no solo describe el territorio — lo interpreta desde la memoria, el conflicto, el poder y la esperanza colectiva.
-
-    Líneas de inversión disponibles (usa EXACTAMENTE estos nombres, sin modificar):
-    {lineas_str}
-
-    Para cada frase numerada, indica a cuáles líneas de inversión corresponde. Una frase puede corresponder a varias líneas.
-
-    Frases:
-    {frases_str}
-
-    Responde SOLO en este formato exacto, una línea por frase numerada:
-    1. Agua y territorio, Desarrollo rural
-    2. Fortalecimiento comunitario
-    (usa los nombres EXACTOS de las líneas disponibles, no inventes nombres nuevos)
-    Sin explicaciones adicionales."""
+                        frases_l = sub["frase"].tolist()
+                        lin_str  = "\n".join(f"- {l}" for l in lin_disp)
+                        for ini in range(0,len(frases_l),20):
+                            sublote = frases_l[ini:ini+20]
+                            frases_str = "\n".join(f"{i+1}. {f}" for i,f in enumerate(sublote))
+                            prompt_l = (f"Eres un experto en desarrollo territorial (IAP, Fals Borda, Freire).\n"
+                                        f"Líneas disponibles (usa EXACTAMENTE estos nombres):\n{lin_str}\n\n"
+                                        f"Para cada frase, indica las líneas correspondientes.\nFrases:\n{frases_str}\n\n"
+                                        f"Formato: 1. Linea1, Linea2\n2. Linea3\nSin explicaciones.")
                             try:
-                                resp = client.chat.complete(
+                                resp_l = client.chat.complete(
                                     model="mistral-small-latest",
-                                    messages=[{"role": "user", "content": prompt}],
-                                    max_tokens=1500
-                                )
-                                lineas_resp = resp.choices[0].message.content.strip().split("\n")
-                                for i, frase in enumerate(sublote):
-                                    if i < len(lineas_resp):
-                                        linea_raw = lineas_resp[i].split(". ", 1)[-1].strip().rstrip(".")
-                                        partes = [p.strip().rstrip(".") for p in linea_raw.split(",")]
-                                        partes_normalizadas = []
+                                    messages=[{"role":"user","content":prompt_l}],
+                                    max_tokens=1500)
+                                lineas_r = resp_l.choices[0].message.content.strip().split("\n")
+                                for i,frase in enumerate(sublote):
+                                    if i<len(lineas_r):
+                                        lin_raw = lineas_r[i].split(". ",1)[-1].strip().rstrip(".")
+                                        partes  = [p.strip().rstrip(".") for p in lin_raw.split(",")]
+                                        norm_ps = []
                                         for parte in partes:
-                                            parte_lower = parte.lower().strip()
-                                            if any(cn in parte_lower for cn in nombres_componentes):
+                                            pl = parte.lower().strip()
+                                            if any(nc in pl for nc in ncomp):
                                                 continue
-                                            mejor = min(lineas_disponibles,
-                                                       key=lambda l: sum(c not in l.lower() for c in parte_lower))
-                                            palabras_parte = set(parte_lower.split())
-                                            palabras_mejor = set(mejor.lower().split())
-                                            if len(palabras_parte & palabras_mejor) >= 1:
-                                                partes_normalizadas.append(mejor)
-                                        linea_final = ", ".join(partes_normalizadas) if partes_normalizadas else "No determinado"
-                                    else:
-                                        linea_final = "No determinado"
-                                    idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
-                                    if len(idx) > 0:
-                                        df_result.loc[idx[0], "lineas_inversion"] = linea_final
-                            except Exception as e:
-                                for frase in sublote:
-                                    idx = df_result[(df_result["componente"] == comp) & (df_result["frase"] == frase)].index
-                                    if len(idx) > 0:
-                                        df_result.loc[idx[0], "lineas_inversion"] = "No determinado"
+                                            mejor = min(lin_disp,
+                                                        key=lambda l: sum(c not in l.lower() for c in pl))
+                                            if len(set(pl.split())&set(mejor.lower().split()))>=1:
+                                                norm_ps.append(mejor)
+                                        resultado_l = ", ".join(norm_ps) if norm_ps else lin_disp[0]
+                                        idx_g = ini+i
+                                        if idx_g<len(sub):
+                                            df_result.loc[sub.index[idx_g],"lineas_inversion"] = resultado_l
+                            except:
+                                for i in range(len(sublote)):
+                                    idx_g = ini+i
+                                    if idx_g<len(sub):
+                                        df_result.loc[sub.index[idx_g],"lineas_inversion"] = (
+                                            lin_disp[0] if lin_disp else "No determinado")
 
                 st.session_state.cache_result_cart = df_result
-                st.session_state.cache_key_saved = cache_key
-                with st.spinner("Guardando análisis en GitHub para uso futuro..."):
-                    guardado = guardar_resultado_github(df_result, archivo_hash)
-                if guardado:
-                    st.success("✅ Análisis guardado — próximas cargas serán instantáneas.")
-                else:
-                    st.warning("⚠️ No se pudo guardar en GitHub — se usará caché local.")
-                st.success("Análisis completado.")            
-            st.session_state.resultados_cart = df_result
+                st.session_state.cache_key_saved   = cache_key
 
-            # ── SUBREGISTRO ───────────────────────────────────────
-            st.subheader("🔎 Detección de subregistro")
-            for a in detectar_subregistro(df_result):
-                st.write(a)
+                # ── NIVEL 3: Guardar en GitHub para futuras sesiones ──
+                # (se hace después del análisis completo, incluyendo categorización)
+                # Se ejecuta al final — ver bloque de guardado post-categorización
 
-            # ── FILTROS ───────────────────────────────────────────
-            st.subheader("Filtrar resultados")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                comp_filtro = st.multiselect("Componente:", cols_componentes, default=cols_componentes)
-            with col2:
-                municipios_disp = sorted(df_result["municipio"].dropna().unique())
-                muni_filtro = st.multiselect("Municipio:", municipios_disp, default=municipios_disp)
-            with col3:
-                grupos_disp = sorted(df_result["grupo"].dropna().unique())
-                grupo_filtro = st.multiselect("Grupo:", grupos_disp, default=grupos_disp)
+            # ── Filtros ───────────────────────────────────────────
+            st.subheader("🔎 Filtros")
+            ff1, ff2 = st.columns(2)
+            with ff1:
+                muni_f = st.multiselect("Filtrar por municipio:",
+                    df_result["municipio"].dropna().unique() if "municipio" in df_result.columns else [],
+                    default=list(df_result["municipio"].dropna().unique())
+                    if "municipio" in df_result.columns else [])
+            with ff2:
+                comp_f = st.multiselect("Filtrar por componente:",
+                                        cols_componentes, default=cols_componentes)
 
-            df_filtrado = df_result[
-                (df_result["componente"].isin(comp_filtro)) &
-                (df_result["municipio"].isin(muni_filtro)) &
-                (df_result["grupo"].isin(grupo_filtro))
-            ]
+            df_fil = df_result.copy()
+            if muni_f and "municipio" in df_fil.columns:
+                df_fil = df_fil[df_fil["municipio"].isin(muni_f)]
+            if comp_f:
+                df_fil = df_fil[df_fil["componente"].isin(comp_f)]
 
-            # ── DISTRIBUCIÓN ──────────────────────────────────────
+            # ── Distribución por componente ───────────────────────
             st.subheader("📊 Distribución por componente")
-            conteo_comp = df_filtrado["componente"].value_counts().reset_index()
-            conteo_comp.columns = ["Componente", "Frases"]
-            conteo_comp["Porcentaje"] = (conteo_comp["Frases"] / conteo_comp["Frases"].sum() * 100).round(1)
-            col1, col2 = st.columns(2)
-            with col1:
-                fig_t = px.pie(conteo_comp, names="Componente", values="Frases",
-                              title="Distribución por componente", hole=0.3)
-                st.plotly_chart(fig_t, use_container_width=True)
-            with col2:
-                fig_b = px.bar(conteo_comp, x="Componente", y="Porcentaje", text="Porcentaje",
-                              color="Componente", title="Porcentaje por componente (%)")
-                fig_b.update_traces(texttemplate="%{text}%", textposition="outside")
-                st.plotly_chart(fig_b, use_container_width=True)
+            cnt_comp = df_fil["componente"].value_counts().reset_index()
+            cnt_comp.columns = ["Componente","Frases"]
+            st.plotly_chart(px.pie(cnt_comp,names="Componente",values="Frases",
+                                   title="Distribución de frases por componente",hole=0.3),
+                           use_container_width=True)
 
-            # ── LÍNEAS DE INVERSIÓN ───────────────────────────────
-            st.subheader("💰 Distribución por línea de inversión")
-            lineas_canonicas = []
-            for _, fila in df_filtrado.iterrows():
-                for l in fila["lineas_disponibles"]:
-                    l_clean = l.strip().rstrip(".").strip()
-                    if l_clean and l_clean not in lineas_canonicas:
-                        lineas_canonicas.append(l_clean)
+            # ── Líneas de inversión ───────────────────────────────
+            st.subheader("📈 Líneas de inversión")
+            lin_cnt = []
+            for ls in df_fil["lineas_inversion"]:
+                for l in str(ls).split(","):
+                    nm = normalizar_linea(l.strip().rstrip(".").strip())
+                    if nm:
+                        lin_cnt.append(nm)
+            if lin_cnt:
+                cnt_lin = pd.DataFrame({"linea":lin_cnt})["linea"].value_counts().reset_index()
+                cnt_lin.columns = ["Línea de inversión","Frecuencia"]
+                st.plotly_chart(px.bar(cnt_lin,x="Línea de inversión",y="Frecuencia",
+                                      color="Línea de inversión",
+                                      title="Distribución por línea de inversión"),
+                               use_container_width=True)
 
-            def normalizar_linea(texto):
-                texto = texto.strip().rstrip(".").strip().lower()
-                if not texto or len(texto) < 3:
-                    return None
-                mejor_coincidencia = None
-                mejor_puntaje = 0
-                for canon in lineas_canonicas:
-                    palabras_canon = set(canon.lower().split())
-                    palabras_texto = set(texto.split())
-                    coincidencias = len(palabras_canon & palabras_texto)
-                    puntaje = coincidencias / max(len(palabras_canon), 1)
-                    if puntaje > mejor_puntaje and puntaje >= 0.4:
-                        mejor_puntaje = puntaje
-                        mejor_coincidencia = canon
-                return mejor_coincidencia
+            # ── Cruce componente x línea ──────────────────────────
+            st.subheader("🔀 Cruce componente × línea")
+            cruce_v = []
+            for _, row_cv in df_fil.iterrows():
+                for l in str(row_cv["lineas_inversion"]).split(","):
+                    nm = normalizar_linea(l.strip().rstrip(".").strip())
+                    if nm:
+                        cruce_v.append({"Componente":row_cv["componente"],"Línea":nm})
+            if cruce_v:
+                piv_cv = pd.DataFrame(cruce_v).groupby(["Componente","Línea"]).size().reset_index(name="n")
+                st.plotly_chart(px.bar(piv_cv,x="Componente",y="n",color="Línea",
+                                      barmode="group",title="Componentes por línea de inversión"),
+                               use_container_width=True)
 
-            todas_lineas = []
-            for lineas_str in df_filtrado["lineas_inversion"]:
-                for l in str(lineas_str).split(","):
-                    normalizada = normalizar_linea(l)
-                    if normalizada:
-                        todas_lineas.append(normalizada)                                
-            if todas_lineas:
-                df_lineas = pd.DataFrame({"linea": todas_lineas})
-                conteo_lineas = df_lineas["linea"].value_counts().reset_index()
-                conteo_lineas.columns = ["Línea de inversión", "Frecuencia"]
-                fig_li = px.bar(conteo_lineas, x="Línea de inversión", y="Frecuencia",
-                               color="Línea de inversión", title="Frecuencia por línea de inversión")
-                st.plotly_chart(fig_li, use_container_width=True)
-
-                st.subheader("Cruce: Componente × Línea de inversión")
-                cruce_data = []
-                for _, row in df_filtrado.iterrows():
-                    for l in str(row["lineas_inversion"]).split(","):
-                        normalizada = normalizar_linea(l)
-                        if normalizada:
-                            cruce_data.append({"Componente": row["componente"], "Línea": normalizada})
-                if cruce_data:
-                    df_cruce = pd.DataFrame(cruce_data)
-                    pivot = df_cruce.groupby(["Componente", "Línea"]).size().reset_index(name="n")
-                    fig_cruce = px.bar(pivot, x="Componente", y="n", color="Línea",
-                                      barmode="group", title="Componentes por línea de inversión")
-                    st.plotly_chart(fig_cruce, use_container_width=True)
-
-           # ── GRUPOS POR COMPONENTE ─────────────────────────────
+            # ── Grupos semánticos ─────────────────────────────────
             st.subheader("Grupos semánticos por componente")
-            cols_graf = st.columns(2)
-            for i, comp in enumerate(comp_filtro):
-                subset_comp = df_filtrado[df_filtrado["componente"] == comp]
-                conteo_g = subset_comp["grupo"].value_counts().reset_index()
-                conteo_g.columns = ["Grupo", "Frecuencia"]
-                frases_rep = {}
-                for grupo in conteo_g["Grupo"]:
-                    top_frase = subset_comp[subset_comp["grupo"] == grupo].nlargest(1, "peso_semantico")
-                    if len(top_frase) > 0:
-                        frase = top_frase.iloc[0]["frase"]
-                        frase_corta = frase[:90] + "..." if len(frase) > 90 else frase
-                        frases_rep[grupo] = frase_corta
-                conteo_g["Tema"] = conteo_g["Grupo"].map(frases_rep)
-                with cols_graf[i % 2]:
-                    fig_g = px.bar(
-                        conteo_g, x="Grupo", y="Frecuencia",
-                        color="Grupo", title=f"{comp.upper()}",
-                        text="Frecuencia",
-                        hover_data={"Tema": True}
-                    )
+            cols_g = st.columns(2)
+            for i_g, comp_g in enumerate(comp_f):
+                sub_g = df_fil[df_fil["componente"]==comp_g]
+                cnt_g = sub_g["grupo"].value_counts().reset_index()
+                cnt_g.columns = ["Grupo","Frecuencia"]
+                fr_rep = {}
+                for grp in cnt_g["Grupo"]:
+                    top1 = sub_g[sub_g["grupo"]==grp].nlargest(1,"peso_semantico")
+                    if len(top1)>0:
+                        frt = top1.iloc[0]["frase"]
+                        fr_rep[grp] = frt[:90]+"..." if len(frt)>90 else frt
+                cnt_g["Tema"] = cnt_g["Grupo"].map(fr_rep)
+                with cols_g[i_g%2]:
+                    fig_g = px.bar(cnt_g,x="Grupo",y="Frecuencia",color="Grupo",
+                                  title=f"{comp_g.upper()}",text="Frecuencia",
+                                  hover_data={"Tema":True})
                     fig_g.update_traces(textposition="outside")
-                    fig_g.update_layout(showlegend=False, height=350)
-                    st.plotly_chart(fig_g, use_container_width=True)
-                    for _, row in conteo_g.iterrows():
-                        st.caption(f"**{row['Grupo']}:** {row['Tema']}")
-            # ── COHESIÓN ──────────────────────────────────────────
+                    fig_g.update_layout(showlegend=False,height=350)
+                    st.plotly_chart(fig_g,use_container_width=True)
+                    for _, rg in cnt_g.iterrows():
+                        st.caption(f"**{rg['Grupo']}:** {rg['Tema']}")
+
+            # ── Cohesión semántica ────────────────────────────────
             st.subheader("Cohesión semántica por componente")
-            pesos_c = df_filtrado.groupby("componente")["peso_semantico"].mean().round(3).reset_index()
-            fig_p = px.bar(pesos_c, x="componente", y="peso_semantico",
-                          color="peso_semantico", color_continuous_scale="Teal",
-                          title="Cohesión semántica promedio")
-            st.plotly_chart(fig_p, use_container_width=True)
+            pesos_c = df_fil.groupby("componente")["peso_semantico"].mean().round(3).reset_index()
+            st.plotly_chart(px.bar(pesos_c,x="componente",y="peso_semantico",
+                                  color="peso_semantico",color_continuous_scale="Teal",
+                                  title="Cohesión semántica promedio"),
+                           use_container_width=True)
 
-            # ── CALCULAR CATEGORIZACIÓN (caché) ────────────────
-            if "cache_cat_cart" not in st.session_state or st.session_state.get("cache_key_saved") != cache_key:
-                cat_por_componente = {}
-                cat_por_vereda = {}
-                veredas_unicas_cat = sorted(df_filtrado["vereda"].dropna().unique())
-                for comp in comp_filtro:
-                    frases_comp = df_filtrado[df_filtrado["componente"] == comp]["frase"].tolist()
-                    cat_por_componente[comp] = categorizar_hallazgos(frases_comp, contexto)
-                    cat_por_vereda[comp] = {}
-                    for vereda in veredas_unicas_cat:
-                        frases_vereda = df_filtrado[
-                            (df_filtrado["componente"] == comp) &
-                            (df_filtrado["vereda"] == vereda)
-                        ]["frase"].tolist()
-                        if frases_vereda:
-                            cat_por_vereda[comp][vereda] = categorizar_hallazgos(frases_vereda, contexto)
-                st.session_state.cache_cat_cart = cat_por_componente
-                st.session_state.cache_cat_vereda = cat_por_vereda
+            # ── Categorización ────────────────────────────────────
+            if ("cache_cat_cart" not in st.session_state or
+                    st.session_state.get("cache_key_saved")!=cache_key):
+                cat_comp = {}
+                cat_ver  = {}
+                veredas_u = (sorted(df_fil["vereda"].dropna().unique())
+                             if "vereda" in df_fil.columns else [])
+                for comp_c in comp_f:
+                    frases_c = df_fil[df_fil["componente"]==comp_c]["frase"].tolist()
+                    cat_comp[comp_c] = categorizar_hallazgos(frases_c, contexto)
+                    cat_ver[comp_c]  = {}
+                    for ver in veredas_u:
+                        fr_v = df_fil[(df_fil["componente"]==comp_c)&
+                                      (df_fil["vereda"]==ver)]["frase"].tolist()
+                        if fr_v:
+                            cat_ver[comp_c][ver] = categorizar_hallazgos(fr_v, contexto)
+                st.session_state.cache_cat_cart   = cat_comp
+                st.session_state.cache_cat_vereda  = cat_ver
+                # Guardar análisis completo en GitHub
+                with st.spinner("Guardando análisis en GitHub para futuras sesiones..."):
+                    datos_a_guardar = {
+                        "df_result": df_a_cache(df_result),
+                        "cat_comp":  cat_comp,
+                        "cat_ver":   cat_ver,
+                    }
+                    ok_gh = escribir_cache_github(archivo_hash, datos_a_guardar)
+                    if ok_gh:
+                        st.success("✅ Análisis guardado en GitHub — la próxima sesión cargará al instante.")
+                    else:
+                        st.caption("ℹ️ No se pudo guardar en GitHub (continúa normalmente).")
             else:
-                cat_por_componente = st.session_state.cache_cat_cart
-                cat_por_vereda = st.session_state.cache_cat_vereda
+                cat_comp = st.session_state.cache_cat_cart
+                cat_ver  = st.session_state.cache_cat_vereda
 
-            # ── CATEGORIZACIÓN ────────────────────────────────────
-            st.subheader("🗂️ Categorización de hallazgos por componente")
-            for comp in comp_filtro:
-                with st.expander(f"📌 {comp}"):
-                    st.markdown(cat_por_componente.get(comp, "No disponible"))
+            st.subheader("🗂️ Categorización por componente")
+            for comp_c2 in comp_f:
+                with st.expander(f"📌 {comp_c2}"):
+                    st.markdown(cat_comp.get(comp_c2,"No disponible"))
 
-            st.subheader("🗂️ Categorización de hallazgos por vereda")
-            veredas_unicas = sorted(df_filtrado["vereda"].dropna().unique())
-            vereda_sel = st.selectbox("Selecciona una vereda:", veredas_unicas)
-            for comp in comp_filtro:
-                if vereda_sel in cat_por_vereda.get(comp, {}):
-                    with st.expander(f"📌 {comp}"):
-                        st.markdown(cat_por_vereda[comp][vereda_sel])
+            st.subheader("🗂️ Categorización por vereda")
+            veredas_u2 = (sorted(df_fil["vereda"].dropna().unique())
+                          if "vereda" in df_fil.columns else [])
+            if veredas_u2:
+                ver_sel = st.selectbox("Selecciona una vereda:", veredas_u2)
+                for comp_c3 in comp_f:
+                    if ver_sel in cat_ver.get(comp_c3,{}):
+                        with st.expander(f"📌 {comp_c3}"):
+                            st.markdown(cat_ver[comp_c3][ver_sel])
 
-            # ── RESUMEN EJECUTIVO ─────────────────────────────────
-            st.subheader("📋 Resumen ejecutivo por componente")
-            resumen_exec = df_filtrado.groupby("componente").agg(
-                Total_frases=("frase", "count"),
-                Cohesion=("peso_semantico", "mean")
-            ).round(3).reset_index()
-            resumen_exec["Porcentaje"] = (resumen_exec["Total_frases"] / resumen_exec["Total_frases"].sum() * 100).round(1).astype(str) + "%"
-            resumen_exec.columns = ["Componente", "Total frases", "Cohesión semántica", "Porcentaje"]
+            # ── Resumen ejecutivo ─────────────────────────────────
+            st.subheader("📋 Resumen ejecutivo")
+            resumen_exec = df_fil.groupby("componente").agg(
+                Total_frases=("frase","count"),
+                Cohesion=("peso_semantico","mean")).round(3).reset_index()
+            resumen_exec["Porcentaje"] = (
+                resumen_exec["Total_frases"]/resumen_exec["Total_frases"].sum()*100
+            ).round(1).astype(str) + "%"
+            resumen_exec.columns = ["Componente","Total frases","Cohesión semántica","Porcentaje"]
             st.dataframe(resumen_exec, use_container_width=True)
 
-            # ── FRASES REPRESENTATIVAS ────────────────────────────
-            st.subheader("💬 Frases más representativas por componente")
-            for comp in comp_filtro:
-               with st.expander(f"📌 {comp}"):
-                    subset_comp = df_filtrado[df_filtrado["componente"] == comp]
-                    top = subset_comp.nlargest(5, "peso_semantico")
-                    frases_vistas = []
-                    vectores_vistos = []
-                    for _, row in top.iterrows():
-                        frase = row["frase"].strip()
-                        if vectores_vistos:
-                            vec_frase = modelo.encode([frase])
-                            sims = cosine_similarity(vec_frase, vectores_vistos)[0]
-                            es_repetida = any(s > 0.75 for s in sims)
-                        else:
-                            es_repetida = False
-                        if not es_repetida:
-                            grupo_frase = row["grupo"]
-                            subset_grupo = subset_comp[subset_comp["grupo"] == grupo_frase]
-                            frecuencia = subset_grupo.shape[0]
-                            peso = round(float(row['peso_semantico']), 3)
-                            if peso >= 0.85:
-                                relevancia = "Alta relevancia 🔴"
-                            elif peso >= 0.65:
-                                relevancia = "Media relevancia 🟡"
-                            else:
-                                relevancia = "Baja relevancia 🟢"
-                            st.write(f"• {frase} (peso: {peso} — {relevancia})")
-                            if frecuencia > 1:
-                                st.caption(f"  💬 {frecuencia} frases con temática similar en este grupo")
-                                otras = subset_grupo[subset_grupo["frase"] != frase]["frase"].head(2).tolist()
-                                for otra in otras:
-                                    st.caption(f"  ↳ {otra}")
-                            lineas = str(row['lineas_inversion'])
-                            if lineas not in ["Sin líneas definidas", "No determinado", "nan"]:
-                                st.caption(f"  Líneas: {lineas}")
-                            frases_vistas.append(frase)
-                            vectores_vistos.append(modelo.encode([frase])[0])                            
-            # ── INFORME IA ────────────────────────────────────────
-            st.subheader("📄 Informe ejecutivo generado por IA")
-            resumen_para_ia = f"""
-Contexto: {contexto}
-Total participantes: {int(total_participantes)}
-Total frases analizadas: {len(df_filtrado)}
-Municipios: {', '.join(muni_filtro)}
-Componentes: {', '.join(comp_filtro)}
-Distribución por componente:
-{conteo_comp.to_string(index=False)}
-Cohesión semántica:
-{pesos_c.to_string(index=False)}
-Frases más representativas:
-"""
-            for comp in comp_filtro:
-                top = df_filtrado[df_filtrado["componente"] == comp].nlargest(2, "peso_semantico")
-                resumen_para_ia += f"\n{comp}:\n"
-                for _, row in top.iterrows():
-                    resumen_para_ia += f"  - {row['frase']} (Líneas: {row['lineas_inversion']})\n"
+            # ── Frases representativas ────────────────────────────
+            st.subheader("💬 Frases más representativas")
+            for comp_fr2 in comp_f:
+                with st.expander(f"📌 {comp_fr2}"):
+                    sub_fr2 = df_fil[df_fil["componente"]==comp_fr2]
+                    top_fr2 = sub_fr2.nlargest(5,"peso_semantico")
+                    fv2, vv2 = [], []
+                    for _, row_fr2 in top_fr2.iterrows():
+                        frase2 = row_fr2["frase"].strip()
+                        if vv2:
+                            sims2 = cosine_similarity(modelo.encode([frase2]),vv2)[0]
+                            if any(s>0.75 for s in sims2):
+                                continue
+                        peso2 = round(float(row_fr2["peso_semantico"]),3)
+                        rel2  = ("Alta relevancia 🔴" if peso2>=0.85
+                                 else ("Media relevancia 🟡" if peso2>=0.65 else "Baja relevancia 🟢"))
+                        grp2  = row_fr2["grupo"]
+                        sub_g2 = sub_fr2[sub_fr2["grupo"]==grp2]
+                        st.write(f"• {frase2} (peso: {peso2} — {rel2})")
+                        if sub_g2.shape[0]>1:
+                            st.caption(f"  💬 {sub_g2.shape[0]} frases similares en este grupo")
+                            for otra in sub_g2[sub_g2["frase"]!=frase2]["frase"].head(2):
+                                st.caption(f"  ↳ {otra}")
+                        lin2 = str(row_fr2["lineas_inversion"])
+                        if lin2 not in ["Sin líneas definidas","No determinado","nan"]:
+                            st.caption(f"  Líneas: {lin2}")
+                        fv2.append(frase2)
+                        vv2.append(modelo.encode([frase2])[0])
+
+            # ── Informe IA ────────────────────────────────────────
+            st.subheader("📄 Informe ejecutivo IA")
+            res_ia = (f"\nContexto: {contexto}\n"
+                      f"Total participantes: {int(total_participantes)}\n"
+                      f"Total frases: {len(df_fil)}\n"
+                      f"Municipios: {', '.join(muni_f)}\n"
+                      f"Componentes: {', '.join(comp_f)}\n"
+                      f"Distribución:\n{cnt_comp.to_string(index=False)}\n"
+                      f"Cohesión:\n{pesos_c.to_string(index=False)}\n"
+                      "Frases representativas:\n")
+            for comp_ia in comp_f:
+                top_ia = df_fil[df_fil["componente"]==comp_ia].nlargest(2,"peso_semantico")
+                res_ia += f"\n{comp_ia}:\n"
+                for _, row_ia in top_ia.iterrows():
+                    res_ia += f"  - {row_ia['frase']} (Líneas: {row_ia['lineas_inversion']})\n"
 
             with st.spinner("Generando informe ejecutivo con IA..."):
-                informe = generar_informe_ia(resumen_para_ia, contexto)
-                st.session_state.informe_cart = informe
-            st.markdown(informe)
+                informe_cart = generar_informe_ia(res_ia, contexto)
+                st.session_state.informe_cart = informe_cart
+            st.markdown(informe_cart)
 
-            # ── TABLA DETALLADA ───────────────────────────────────
+            # ── Tabla detallada ───────────────────────────────────
             st.subheader("Tabla detallada")
-            comp_vista = st.selectbox("Ver frases del componente:", comp_filtro)
-            cols_vista = ["municipio", "vereda", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
-            st.dataframe(df_filtrado[df_filtrado["componente"] == comp_vista][cols_vista], use_container_width=True)
+            comp_vista = st.selectbox("Ver frases del componente:", comp_f)
+            cols_v = [c for c in ["municipio","vereda","componente","frase","grupo",
+                                   "peso_semantico","lineas_inversion"] if c in df_fil.columns]
+            st.dataframe(df_fil[df_fil["componente"]==comp_vista][cols_v],
+                         use_container_width=True)
 
-            # ── DESCARGA ──────────────────────────────────────────
-            st.session_state.resultados_cart = df_filtrado
+            st.session_state.resultados_cart = df_fil
 
+            # ── Descarga Excel con fórmulas ───────────────────────
             st.subheader("⬇ Descargas")
-            col1, col2 = st.columns(2)
-            with col1:
-                buffer_cart = io.BytesIO()
-                with pd.ExcelWriter(buffer_cart, engine="openpyxl") as writer:
-
-                    # ── HOJA 1: DATOS COMPLETOS ──
-                    from openpyxl.utils import get_column_letter
-                    cols_meta_export = [c for c in ["municipio", "vereda", "año", "semestre"] if c in df_filtrado.columns]
-                    cols_descarga = cols_meta_export + ["componente", "frase", "grupo", "peso_semantico", "lineas_inversion"]
-                    cols_disponibles = [c for c in cols_descarga if c in df_filtrado.columns]
-                    df_export = df_filtrado[cols_disponibles].reset_index(drop=True)
-                    df_export.to_excel(writer, sheet_name="Datos completos", index=False)
-                    # Agregar nota sobre peso_semantico
-                    ws1 = writer.sheets["Datos completos"]
-                    ws1.cell(row=1, column=len(cols_disponibles)+2).value = "NOTA: peso_semantico"
-                    ws1.cell(row=2, column=len(cols_disponibles)+2).value = (
-                        "El peso semántico (0-1) mide qué tan representativa es cada frase de su grupo semántico. "
-                        "Se calcula como similitud coseno entre el vector de la frase y el centroide del grupo "
-                        "(promedio vectorial de todas las frases del grupo). "
-                        "Valor 1 = frase perfectamente representativa del grupo. "
-                        "No tiene fórmula Excel porque requiere vectores de 768 dimensiones generados por el modelo de lenguaje."
-                    )
-
-                    # Calcular columnas clave en Datos completos
-                    col_idx = {col: get_column_letter(i+1) for i, col in enumerate(cols_disponibles)}
-                    col_comp = col_idx.get("componente", "E")
-                    col_grupo = col_idx.get("grupo", "G")
-                    col_peso = col_idx.get("peso_semantico", "H")
-                    col_li = col_idx.get("lineas_inversion", "I")
-                    n_filas = len(df_export) + 1
-                    dc = "'Datos completos'"
-
-                    # ── HOJA 2: DISTRIBUCIÓN POR COMPONENTE ──
-                    componentes_unicos = sorted(df_export["componente"].dropna().unique())
-                    ws2 = writer.book.create_sheet("Distribucion componentes")
-                    ws2.append(["Componente", "Frases", "Porcentaje (%)", "Nota fórmula"])
-                    for i, comp in enumerate(componentes_unicos):
-                        rn = i + 2
-                        f_count = f"=COUNTIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn})"
-                        f_pct = f"=B{rn}/SUM($B$2:$B${len(componentes_unicos)+1})*100"
-                        nota = f"COUNTIF columna {col_comp} de Datos completos"
-                        ws2.append([comp, f_count, f_pct, nota])
-
-                    # ── HOJA 3: LÍNEAS DE INVERSIÓN ──
-                    lineas_export = []
-                    for lineas_str in df_filtrado["lineas_inversion"]:
-                        for l in str(lineas_str).split(","):
-                            l_clean = l.strip().rstrip(".").strip()
-                            normalizada = normalizar_linea(l_clean)
-                            if normalizada:
-                                lineas_export.append(normalizada)
-                    if lineas_export:
-                        lineas_unicas = sorted(set(lineas_export))
-                        ws3 = writer.book.create_sheet("Lineas de inversion")
-                        ws3.append(["Línea de inversión", "Frecuencia", "Fórmula Excel"])
-                        ws3.append(["NOTA", "Una frase puede tener varias líneas — se cuenta cada aparición", ""])
-                        n_datos = len(df_export)
-                        for i, linea in enumerate(lineas_unicas):
-                            rn = i + 3
-                            # Formula: cuenta cuántas veces aparece el nombre de la línea en la columna lineas_inversion
-                            f_linea = (
-                                f"=SUMPRODUCT((LEN({dc}!${col_li}$2:${col_li}${n_filas})"
-                                f'-LEN(SUSTITUIR({dc}!${col_li}$2:${col_li}${n_filas},A{rn},"")))'
-                                f"/LEN(A{rn}))"
-                            )
-                            ws3.append([linea, f_linea, f"SUMPRODUCT+SUSTITUIR en columna {col_li} de Datos completos"])
-
-                    # ── HOJA 4: CRUCE COMPONENTE x LÍNEA ──
-                    cruce_export = []
-                    for _, row in df_filtrado.iterrows():
-                        for l in str(row["lineas_inversion"]).split(","):
-                            l_clean = l.strip().rstrip(".").strip()
-                            normalizada = normalizar_linea(l_clean)
-                            if normalizada:
-                                cruce_export.append({"Componente": row["componente"], "Línea": normalizada})
-                    if cruce_export:
-                        df_cruce_exp = pd.DataFrame(cruce_export)
-                        pivot_exp = df_cruce_exp.groupby(["Componente", "Línea"]).size().reset_index(name="Cantidad")
-                        ws4 = writer.book.create_sheet("Cruce componente x linea")
-                        ws4.append(["Componente", "Línea", "Cantidad", "Fórmula Excel"])
-                        for _, row in pivot_exp.iterrows():
-                            rn = ws4.max_row + 1
-                            # COUNTIFS: columna componente = A y columna lineas contiene B
-                            f_cruce = (
-                                f"=SUMPRODUCT(({dc}!${col_comp}$2:${col_comp}${n_filas}=A{rn})*"
-                                f"(ISNUMBER(SEARCH(B{rn},{dc}!${col_li}$2:${col_li}${n_filas}))))"
-                            )
-                            ws4.append([row["Componente"], row["Línea"], f_cruce, f"SUMPRODUCT col {col_comp}=A y col {col_li} contiene B"])
-
-                    # ── HOJA 5: GRUPOS POR COMPONENTE ──
-                    grupos_export = []
-                    for comp in comp_filtro:
-                        subset_comp = df_filtrado[df_filtrado["componente"] == comp]
-                        for grupo in subset_comp["grupo"].unique():
-                            subset_grupo = subset_comp[subset_comp["grupo"] == grupo]
-                            frase_rep = subset_grupo.nlargest(1, "peso_semantico").iloc[0]["frase"]
-                            grupos_export.append({
-                                "Componente": comp,
-                                "Grupo": grupo,
-                                "Frecuencia": len(subset_grupo),
-                                "Frase representativa": frase_rep
-                            })
-                    ws5 = writer.book.create_sheet("Grupos por componente")
-                    ws5.append(["Componente", "Grupo", "Frecuencia", "Frase representativa", "Fórmula Excel"])
-                    for g in grupos_export:
-                        rn = ws5.max_row + 1
-                        f_grupo = (
-                            f"=COUNTIFS({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},"
-                            f"{dc}!${col_grupo}$2:${col_grupo}${n_filas},B{rn})"
-                        )
-                        ws5.append([g["Componente"], g["Grupo"], f_grupo, g["Frase representativa"], f"COUNTIFS col {col_comp}=A y col {col_grupo}=B"])
-
-                    # ── HOJA 6: COHESIÓN SEMÁNTICA ──
-                    ws6 = writer.book.create_sheet("Cohesion semantica")
-                    ws6.append(["Componente", "Cohesión promedio", "Fórmula Excel equivalente"])
-                    for i, comp in enumerate(componentes_unicos):
-                        rn = i + 2
-                        f_avg = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
-                        cohesion = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
-                        ws6.append([comp, cohesion, f_avg])
-
-                    # ── HOJA 7: RESUMEN EJECUTIVO ──
-                    ws7 = writer.book.create_sheet("Resumen ejecutivo")
-                    ws7.append(["Componente", "Total frases", "Cohesión semántica", "Porcentaje (%)", "Fórmula frases", "Fórmula cohesión"])
-                    n_comp = len(componentes_unicos)
-                    for i, comp in enumerate(componentes_unicos):
-                        rn = i + 2
-                        f_frases = f"=COUNTIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn})"
-                        f_cohesion = f"=AVERAGEIF({dc}!${col_comp}$2:${col_comp}${n_filas},A{rn},{dc}!${col_peso}$2:${col_peso}${n_filas})"
-                        f_pct = f"=B{rn}/SUM($B$2:$B${n_comp+1})*100"
-                        total = len(df_filtrado[df_filtrado["componente"] == comp])
-                        coh = round(df_filtrado[df_filtrado["componente"] == comp]["peso_semantico"].mean(), 3)
-                        pct = round(total / len(df_filtrado) * 100, 1)
-                        ws7.append([comp, f_frases, f_cohesion, f_pct, f"COUNTIF col {col_comp}", f"AVERAGEIF col {col_peso}"])
-
-                   # Hoja 8 — Frases representativas
-                    frases_rep_export = []
-                    for comp in comp_filtro:
-                        subset_comp = df_filtrado[df_filtrado["componente"] == comp]
-                        frases_vistas_exp = []
-                        vectores_vistos_exp = []
-                        top = subset_comp.nlargest(5, "peso_semantico")
-                        for _, row in top.iterrows():
-                            frase = row["frase"].strip()
-                            if vectores_vistos_exp:
-                                vec = modelo.encode([frase])
-                                sims = cosine_similarity(vec, vectores_vistos_exp)[0]
-                                es_rep = any(s > 0.75 for s in sims)
-                            else:
-                                es_rep = False
-                            if not es_rep:
-                                peso = round(float(row["peso_semantico"]), 3)
-                                relevancia = "Alta 🔴" if peso >= 0.85 else ("Media 🟡" if peso >= 0.65 else "Baja 🟢")
-                                grupo_frase = row["grupo"]
-                                subset_grupo = subset_comp[subset_comp["grupo"] == grupo_frase]
-                                frecuencia = subset_grupo.shape[0]
-                                otras = subset_grupo[subset_grupo["frase"] != frase]["frase"].head(2).tolist()
-                                lineas_frase = str(row["lineas_inversion"])
-                                frases_rep_export.append({
-                                    "Componente": comp,
-                                    "Frase": frase,
-                                    "Peso": peso,
-                                    "Relevancia": relevancia,
-                                    "Frases similares en grupo": frecuencia,
-                                    "Variaciones": " | ".join(otras),
-                                    "Líneas de inversión": lineas_frase
-                                })
-                                frases_vistas_exp.append(frase)
-                                vectores_vistos_exp.append(modelo.encode([frase])[0])
-                    pd.DataFrame(frases_rep_export).to_excel(writer, sheet_name="Frases representativas", index=False)
-
-                    # Hoja 10 — Tabla detallada
-                    cols_tabla = [c for c in ["municipio", "vereda", "año", "semestre", "componente", "frase", "grupo", "peso_semantico", "lineas_inversion"] if c in df_filtrado.columns]
-                    df_filtrado[cols_tabla].to_excel(writer, sheet_name="Tabla detallada", index=False)
-                    
-                    # Hoja 9 — Categorización por componente
-                    cat_export = []
-                    for comp, cat_texto in cat_por_componente.items():
-                        for linea in cat_texto.split("\n"):
-                            if linea.strip():
-                                cat_export.append({"Vereda": "TODAS", "Componente": comp, "Categorización": linea.strip()})
-                    pd.DataFrame(cat_export).to_excel(writer, sheet_name="Categorizacion componente", index=False)
-
-                    # Hoja 10 — Categorización por vereda
-                    cat_vereda_export = []
-                    for comp, veredas in cat_por_vereda.items():
-                        for vereda, cat_texto in veredas.items():
-                            for linea in cat_texto.split("\n"):
-                                if linea.strip():
-                                    cat_vereda_export.append({"Vereda": vereda, "Componente": comp, "Categorización": linea.strip()})
-                    pd.DataFrame(cat_vereda_export).to_excel(writer, sheet_name="Categorizacion por vereda", index=False)
-
-                buffer_cart.seek(0)
+            dc1, dc2 = st.columns(2)
+            with dc1:
+                with st.spinner("Construyendo Excel con fórmulas y semáforos..."):
+                    wb_cart = crear_excel_cartografia_formulas(
+                        df_fil, comp_f, cat_comp, cat_ver,
+                        cnt_comp, pesos_c, resumen_exec, contexto)
+                    buf_cart = io.BytesIO()
+                    wb_cart.save(buf_cart)
+                    buf_cart.seek(0)
                 st.download_button(
-                    "⬇ Descargar análisis completo Excel",
-                    data=buffer_cart,
+                    "⬇ Descargar análisis Excel (con fórmulas)",
+                    data=buf_cart,
                     file_name="analisis_cartografia.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="descarga_cart"
-                )
-            with col2:
+                    key="dl_cart_xlsx")
+            with dc2:
                 if st.session_state.informe_cart:
                     st.download_button(
                         "⬇ Descargar informe TXT",
                         data=st.session_state.informe_cart.encode("utf-8"),
                         file_name="informe_cartografia.txt",
-                        key="descarga_informe_cart"
-                    )
+                        key="dl_cart_txt")
