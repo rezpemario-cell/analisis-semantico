@@ -129,7 +129,8 @@ KEYWORDS_TEMAS = {
         'fortalecer','fortalecimiento','vocería','empoderamiento','gestión',
         'comunidad','comunidades','unido','unir','unidos','unida','unidas',
         'participando','participar','acercan','acercar','colectiv','trabajar',
-        'vereda','motivar','motivan','vision','pensar','conceptos','proceso'],
+        'vereda','motivar','motivan','vision','pensar','conceptos','proceso',
+        'acepta','aceptan','hacemos','gente','personas','aceptamos'],
     'Mujer y género': [
         'mujer','mujeres','femenino','género','ama de casa','voceras','rol',
         'madre','madres','cabeza de hogar'],
@@ -163,12 +164,14 @@ KEYWORDS_TEMAS = {
         'empresa','confianza','apoyo','acompañamiento','agradecimiento',
         'colaboración','beneficio','bueno','positivo','experiencia','maravillos',
         'bien','muy bien','todo bien','todo ha sido','ha sido positiv',
-        'llenando','expectativas','espectativas'],
+        'llenando','expectativas','espectativas','reconosen','reconocen',
+        'nos conocen','nos reconoc','nombre','identific'],
     'Riesgo y preocupación cierre': [
         'triste','abandono','finalizar','cierre','solos','sin apoyo','dejar',
         'retiro','desamparados','negativo','negativa','retroceso','mal hecho',
         'poco serios','motivos','algo malo','algo no les gusto','estrategia',
-        'ingresar','territorio','desicion','decisión','no podemos hacer nada'],
+        'ingresar','territorio','desicion','decisión','no podemos hacer nada',
+        'ayudand','ayudan','muy mal','mal porque','nos estan','nos estan'],
     'Alianzas institucionales': [
         'alianza','alcaldía','gobernación','articulación','público-privada',
         'entidad','institucional'],
