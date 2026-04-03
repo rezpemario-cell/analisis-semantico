@@ -119,38 +119,72 @@ def cache_a_df(records):
 # DICCIONARIO DE TEMAS (módulo global)
 # ════════════════════════════════════════════════════════════════
 KEYWORDS_TEMAS = {
-    'Agua y medio ambiente': ['agua','acueducto','hídrico','fuentes','nacimiento',
-                              'reforestar','árbol','medio ambiente','ambiental',
-                              'cuenca','microcuenca','monitoreo','conservación',
-                              'reforestación','siembra','sembrar','sequía'],
-    'Liderazgo y organización': ['liderazgo','líder','jac','junta',
-                                 'organización','participación','capacitar',
-                                 'fortalecer','fortalecimiento','vocería',
-                                 'empoderamiento','gestión'],
-    'Mujer y género': ['mujer','mujeres','femenino','género','ama de casa','voceras'],
-    'Educación y formación': ['educación','formación','capacitación','aprendizaje',
-                              'estudiante','jóvenes','universidad','técnica','sena',
-                              'conocimiento','habilidades'],
-    'Infraestructura': ['vía','vias','camino','caseta','placa','huella',
-                        'construcción','obra','cancha','tanque','sede'],
-    'Agricultura y economía rural': ['café','caficultura','agricultura','campo',
-                                     'emprendimiento','productivo','producción',
-                                     'semilla','cosecha','finca'],
-    'Continuidad y sostenibilidad': ['continuar','continúe','seguir','siga',
-                                     'sostenible','sostenibilidad','durar','mantenerse'],
-    'Comunicación e información': ['comunicación','información','transparencia',
-                                   'redes sociales','difusión','visibilizar','informar'],
-    'Mejora y sugerencias': ['mejorar','mejora','sugerencia','falta','necesita',
-                             'cumplir','cumplimiento','prometieron','convocatoria'],
-    'Percepción positiva empresa': ['empresa','confianza','apoyo','acompañamiento',
-                                    'agradecimiento','colaboración','beneficio'],
-    'Riesgo y preocupación cierre': ['triste','abandono','finalizar','cierre',
-                                     'solos','sin apoyo','dejar','retiro','desamparados'],
-    'Alianzas institucionales': ['alianza','municipio','alcaldía','gobernación',
-                                 'articulación','público-privada','entidad'],
-    'Minería': ['minería','minero','mina','formalización','exploración'],
-    'Nuevos proyectos propuestos': ['turismo','turístico','aves','fauna','flora',
-                                    'tiempo libre','ludico','pollos','horticultura'],
+    'Agua y medio ambiente': [
+        'agua','acueducto','hídrico','fuentes','nacimiento','reforestar','árbol',
+        'medio ambiente','ambiental','cuenca','microcuenca','monitoreo','conservación',
+        'reforestación','siembra','sembrar','sequía','recursos naturales','natural',
+        'recurso','flora','fauna','ecosistema','rio','quebrada'],
+    'Liderazgo y organización comunitaria': [
+        'liderazgo','líder','jac','junta','organización','participación','capacitar',
+        'fortalecer','fortalecimiento','vocería','empoderamiento','gestión',
+        'comunidad','comunidades','unido','unir','unidos','unida','unidas',
+        'participando','participar','acercan','acercar','colectiv','trabajar',
+        'vereda','motivar','motivan','vision','pensar','conceptos','proceso'],
+    'Mujer y género': [
+        'mujer','mujeres','femenino','género','ama de casa','voceras','rol',
+        'madre','madres','cabeza de hogar'],
+    'Educación y formación': [
+        'educación','formación','capacitación','aprendizaje','estudiante',
+        'jóvenes','universidad','técnica','sena','conocimiento','habilidades',
+        'derechos','deberes','entendimiento','diálogo','dialogo','concientizar',
+        'niños','voceros','escuela'],
+    'Infraestructura': [
+        'vía','vias','camino','caseta','placa','huella','construcción','obra',
+        'cancha','tanque','sede','gimnasio','gimnacio','infraestructura',
+        'infracstuturas','abras','obras','carriles','movilidad','urbano',
+        'pública','publicas','instalacion'],
+    'Agricultura y economía rural': [
+        'café','caficultura','agricultura','campo','emprendimiento','productivo',
+        'producción','semilla','cosecha','finca','pollos','horticultura',
+        'cultivo','siembra','campo','calidad de vida'],
+    'Continuidad y sostenibilidad': [
+        'continuar','continúe','seguir','siga','sostenible','sostenibilidad',
+        'durar','mantenerse','frutos','adelante','futuro','presente','avanzar',
+        'resultados','espectativas','expectativas','luchar','luchando'],
+    'Comunicación e información': [
+        'comunicación','información','transparencia','redes sociales','difusión',
+        'visibilizar','informar','derechos','deberes','entendimiento','diálogo',
+        'preguntas','personales'],
+    'Mejora y sugerencias': [
+        'mejorar','mejora','sugerencia','falta','necesita','cumplir',
+        'cumplimiento','prometieron','convocatoria','compromiso','prioridad',
+        'sector','cumplan','proyectos que nos dijeron','mas compromiso'],
+    'Percepción positiva empresa': [
+        'empresa','confianza','apoyo','acompañamiento','agradecimiento',
+        'colaboración','beneficio','bueno','positivo','experiencia','maravillos',
+        'bien','muy bien','todo bien','todo ha sido','ha sido positiv',
+        'llenando','expectativas','espectativas'],
+    'Riesgo y preocupación cierre': [
+        'triste','abandono','finalizar','cierre','solos','sin apoyo','dejar',
+        'retiro','desamparados','negativo','negativa','retroceso','mal hecho',
+        'poco serios','motivos','algo malo','algo no les gusto','estrategia',
+        'ingresar','territorio','desicion','decisión','no podemos hacer nada'],
+    'Alianzas institucionales': [
+        'alianza','alcaldía','gobernación','articulación','público-privada',
+        'entidad','institucional'],
+    'Minería': [
+        'minería','minero','mina','formalización','exploración'],
+    'Nuevos proyectos propuestos': [
+        'turismo','turístico','aves','avistamiento','fauna','flora','tiempo libre',
+        'ludico','pollos','horticultura','deporte','fútbol','futbol','deportiv',
+        'piscina','recreacion','recreación','aire libre','salud','actividad física',
+        'escuela de futbol','nueva actividad','nuevo proyecto'],
+    'Respuesta inespecífica': [
+        'ninguno','nada','ninguna','no se','no sé','no me ocurre','no ocurre',
+        'no haría','no hariamos','no podemos','no se me','desecsion','desicion',
+        'decisión','así esta','asi esta','esta bien','está bien','estamos en',
+        'solo participé','solo participe','socializacion','socialización',
+        'diferentes necesidades','en diferentes','no estaria','no estaría'],
 }
 
 LINEAS_CANONICAS = [
