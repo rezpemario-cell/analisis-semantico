@@ -226,7 +226,7 @@ def generar_informe_ia(resumen_datos, contexto):
     try:
         resp = client.chat.complete(model="mistral-large-latest",
                                     messages=[{"role":"user","content":prompt}],
-                                    max_tokens=2500)
+                                    max_tokens=3500)
         return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {e}"
@@ -1260,6 +1260,19 @@ if modo == "📋 Encuesta":
             with cm2:
                 cols_sn  = st.multiselect("Columnas Sí / No:", cols_ref)
                 cols_txt = st.multiselect("Columnas texto abierto:", cols_ref)
+            cm3, cm4 = st.columns(2)
+            with cm3:
+                col_muni = st.selectbox("Columna municipio (opcional):",
+                                        ["(ninguna)"] + cols_ref)
+                col_muni = None if col_muni == "(ninguna)" else col_muni
+                col_ver  = st.selectbox("Columna vereda (opcional):",
+                                        ["(ninguna)"] + cols_ref)
+                col_ver  = None if col_ver == "(ninguna)" else col_ver
+            with cm4:
+                col_part = st.selectbox(
+                    "Columna participantes (si cada fila es UN participante, deja (ninguna)):",
+                    ["(ninguna)"] + cols_ref)
+                col_part = None if col_part == "(ninguna)" else col_part
 
             # ── Fase 1: Validación ────────────────────────────────
             st.subheader("📋 Fase 1 — Validación de datos")
@@ -1336,6 +1349,69 @@ if modo == "📋 Encuesta":
                     filas_consolidado, filas_acuerdo = [], []
                     filas_sino, filas_cal, filas_tri = [], [], []
                     filas_cual, sin_clasificar_enc   = [], []
+
+                    # ── Participación territorial (si el usuario configuró cols geo) ─
+                    _col_muni = col_muni if "col_muni" in vars() else None
+                    _col_ver  = col_ver  if "col_ver"  in vars() else None
+                    _col_part = col_part if "col_part" in vars() else None
+
+                    if _col_muni or _col_ver:
+                        st.subheader("👥 Participación por territorio")
+                        df_geo_list = []
+                        for gr_geo, df_geo_g in dfs_ok.items():
+                            df_tmp = df_geo_g.copy()
+                            df_tmp["_grupo"] = gr_geo
+                            if _col_part and _col_part in df_tmp.columns:
+                                df_tmp["_part"] = pd.to_numeric(df_tmp[_col_part], errors="coerce").fillna(1)
+                            else:
+                                df_tmp["_part"] = 1
+                            df_geo_list.append(df_tmp)
+                        df_geo = pd.concat(df_geo_list, ignore_index=True)
+
+                        if _col_muni and _col_muni in df_geo.columns:
+                            pm_enc = (df_geo.groupby(_col_muni)["_part"]
+                                      .sum().reset_index()
+                                      .sort_values("_part", ascending=False))
+                            pm_enc.columns = ["Municipio", "Participantes"]
+                            col_pm1, col_pm2 = st.columns(2)
+                            with col_pm1:
+                                st.plotly_chart(
+                                    px.bar(pm_enc, x="Municipio", y="Participantes",
+                                           color="Municipio", text="Participantes",
+                                           title="Participantes por municipio"),
+                                    use_container_width=True)
+                            with col_pm2:
+                                st.dataframe(pm_enc, use_container_width=True)
+
+                        if _col_ver and _col_ver in df_geo.columns:
+                            group_cols = ([_col_muni, _col_ver]
+                                          if _col_muni and _col_muni in df_geo.columns
+                                          else [_col_ver])
+                            pv_enc = (df_geo.groupby(group_cols)["_part"]
+                                      .sum().reset_index())
+                            if len(group_cols) == 2:
+                                pv_enc.columns = ["Municipio", "Vereda", "Participantes"]
+                                pv_enc = pv_enc.sort_values(["Municipio","Participantes"],
+                                                             ascending=[True, False])
+                                fig_pv = px.bar(pv_enc, x="Vereda", y="Participantes",
+                                                color="Municipio", text="Participantes",
+                                                title="Participantes por vereda")
+                            else:
+                                pv_enc.columns = ["Vereda", "Participantes"]
+                                pv_enc = pv_enc.sort_values("Participantes", ascending=False)
+                                fig_pv = px.bar(pv_enc, x="Vereda", y="Participantes",
+                                                text="Participantes",
+                                                title="Participantes por vereda")
+                            st.plotly_chart(fig_pv, use_container_width=True)
+                            st.dataframe(pv_enc, use_container_width=True)
+
+                        pg_enc = (df_geo.groupby("_grupo")["_part"]
+                                  .sum().reset_index())
+                        pg_enc.columns = ["Grupo", "Participantes"]
+                        total_enc = int(pg_enc["Participantes"].sum())
+                        pg_enc["% del total"] = (pg_enc["Participantes"]/total_enc*100).round(1).astype(str)+"%"
+                        st.metric("👥 Total participantes (todos los grupos)", total_enc)
+                        st.dataframe(pg_enc, use_container_width=True)
 
                     # ── Fase 2: Likert — usando groupby (sin comparación de strings) ─
                     if cols_lk:
@@ -1526,7 +1602,7 @@ if modo == "📋 Encuesta":
                             temas_str_lk = "\n".join(f"{i+1}. {t}"
                                                       for i, t in enumerate(temas_disponibles))
                             with st.spinner(f"Clasificando {len(sin_cl_idx)} respuestas con IA..."):
-                                for inicio in range(0, len(sin_cl_idx), 15):
+                                for inicio in range(0, len(sin_cl_idx), 20):
                                     lote = sin_cl_idx[inicio:inicio + 15]
                                     textos_lote = "\n".join(
                                         f"{i+1}. {r['Texto'][:150]}"
