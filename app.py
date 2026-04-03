@@ -1342,21 +1342,20 @@ if modo == "📋 Encuesta":
                         # Vista de semáforos
                         st.dataframe(pd.DataFrame(filas_consolidado), use_container_width=True)
 
-                        # Vista numérica con colores de fondo (más fácil de leer)
-                        st.write("**Vista numérica** (colores automáticos — verde=bueno, rojo=bajo):")
-                        df_num_lk = pd.DataFrame(filas_consolidado).copy()
-                        df_num_lk = df_num_lk.set_index("Proyecto")
+                        # Vista numérica limpia (valores sin emojis para comparar fácilmente)
+                        st.write("**Vista numérica** — mismo dato sin emojis, para copiar a Excel:")
                         def extraer_num_lk(val):
                             try:
-                                return float(str(val).replace("🟢","").replace("🟡","").replace("🔴","").replace("⬜ Sin dato","").strip())
-                            except:
-                                return np.nan
+                                return round(float(
+                                    str(val).replace("🟢","").replace("🟡","")
+                                    .replace("🔴","").replace("⬜ Sin dato","")
+                                    .replace("⚠️indiv.","").strip()), 2)
+                            except Exception:
+                                return None
+                        df_num_lk = pd.DataFrame(filas_consolidado).copy()
+                        df_num_lk = df_num_lk.set_index("Proyecto")
                         df_num_lk = df_num_lk.applymap(extraer_num_lk)
-                        st.dataframe(
-                            df_num_lk.style.background_gradient(
-                                cmap="RdYlGn", vmin=1, vmax=esc_max, axis=None
-                            ).format("{:.2f}", na_rep="—"),
-                            use_container_width=True)
+                        st.dataframe(df_num_lk, use_container_width=True)
 
                         st.write("**% de acuerdo** (respuestas con valor máximo):")
                         st.dataframe(pd.DataFrame(filas_acuerdo), use_container_width=True)
