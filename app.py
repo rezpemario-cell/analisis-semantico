@@ -1490,94 +1490,125 @@ if modo == "📋 Encuesta":
                         else:
                             st.info("Se necesitan al menos 2 grupos con datos en los mismos indicadores.")
 
-                    # ── Fase 3: Cualitativo con clasificación IA ───
+                    # ── Fase 3: Cualitativo — clasificación en un solo paso ──
                     if cols_txt:
                         st.subheader("💬 Fase 3 — Análisis cualitativo")
-                        textos_sin_clasificar_raw = []
 
+                        # Paso 1: recopilar todos los textos con metadata
+                        registros_cual = []  # [{idx, gr, ct, proy, texto}]
                         for gr, df_g in dfs_ok.items():
                             for ct in cols_txt:
                                 if ct not in df_g.columns:
                                     continue
-                                for _, row_ct in df_g.iterrows():
-                                    txt_ct = str(row_ct.get(ct, ""))
-                                    if not txt_ct or txt_ct == "nan" or len(txt_ct.strip()) < 3:
+                                for idx_row, row_ct in df_g.iterrows():
+                                    txt_ct = str(row_ct.get(ct, "")).strip()
+                                    if not txt_ct or txt_ct == "nan" or len(txt_ct) < 3:
                                         continue
-                                    temas_ct = clasificar_texto_enc(txt_ct)
-                                    proy_ct  = str(row_ct.get(col_proy, "N/A")) if col_proy and col_proy in df_g.columns else "N/A"
-                                    for tema_ct in temas_ct:
-                                        filas_cual.append({
-                                            "Grupo": gr, "Proyecto": proy_ct,
-                                            "Columna": ct, "Tema": tema_ct,
-                                            "Texto": txt_ct[:200]})
-                                    if "Sin clasificar" in temas_ct:
-                                        textos_sin_clasificar_raw.append({
-                                            "Grupo": gr, "Columna": ct,
-                                            "Proyecto": proy_ct, "Texto": txt_ct})
-                                        sin_clasificar_enc.append({
-                                            "Grupo": gr, "Columna": ct, "Texto": txt_ct})
+                                    proy_ct = (str(row_ct.get(col_proy, "N/A"))
+                                               if col_proy and col_proy in df_g.columns
+                                               else "N/A")
+                                    registros_cual.append({
+                                        "idx": len(registros_cual),
+                                        "Grupo": gr, "Columna": ct,
+                                        "Proyecto": proy_ct, "Texto": txt_ct})
 
-                        # Clasificar con IA los textos sin clasificar (en lotes)
-                        if textos_sin_clasificar_raw:
-                            with st.spinner(f"Clasificando {len(textos_sin_clasificar_raw)} respuestas con IA..."):
-                                temas_disponibles = list(KEYWORDS_TEMAS.keys())
-                                sep_n = "\n"
-                                temas_str_ia = sep_n.join(f"- {t}" for t in temas_disponibles)
-                                for inicio in range(0, len(textos_sin_clasificar_raw), 15):
-                                    sublote_sc = textos_sin_clasificar_raw[inicio:inicio+15]
-                                    textos_str_sc = sep_n.join(
-                                        f"{i+1}. {item['Texto'][:120]}"
-                                        for i, item in enumerate(sublote_sc))
-                                    prompt_sc = (
-                                        "Clasifica cada respuesta en UNO de estos temas:\n"
-                                        + temas_str_ia + "\n"
-                                        "Si no corresponde a ninguno, responde: Sin clasificar\n\n"
-                                        "Respuestas:\n"
-                                        + textos_str_sc + "\n\n"
-                                        "Responde SOLO en este formato (una línea por respuesta):\n"
-                                        "1. Nombre exacto del tema\n"
-                                        "2. Nombre exacto del tema\n"
-                                        "Sin explicaciones."
-                                    )
+                        # Paso 2: clasificar por keywords primero
+                        temas_disponibles = list(KEYWORDS_TEMAS.keys())
+                        temas_norm = {normalizar_str(t): t for t in temas_disponibles}
+
+                        for reg in registros_cual:
+                            reg["Tema"] = clasificar_texto_enc(reg["Texto"])[0]
+
+                        # Paso 3: los que quedaron "Sin clasificar" → IA en lotes
+                        sin_cl_idx = [r for r in registros_cual if r["Tema"] == "Sin clasificar"]
+
+                        if sin_cl_idx:
+                            temas_str_lk = "\n".join(f"{i+1}. {t}"
+                                                      for i, t in enumerate(temas_disponibles))
+                            with st.spinner(f"Clasificando {len(sin_cl_idx)} respuestas con IA..."):
+                                for inicio in range(0, len(sin_cl_idx), 15):
+                                    lote = sin_cl_idx[inicio:inicio + 15]
+                                    textos_lote = "\n".join(
+                                        f"{i+1}. {r['Texto'][:150]}"
+                                        for i, r in enumerate(lote))
+                                    prompt_cl = (
+                                        "Tienes esta lista de temas numerados:\n"
+                                        + temas_str_lk + "\n\n"
+                                        "Para cada respuesta, escribe SOLO el número del tema "
+                                        "que mejor corresponda. Si ninguno aplica, escribe 0.\n\n"
+                                        "Respuestas:\n" + textos_lote + "\n\n"
+                                        "Formato de respuesta (una línea por respuesta):\n"
+                                        "1. 3\n2. 7\n3. 0\nSolo el número, sin explicaciones.")
                                     try:
-                                        resp_sc = client.chat.complete(
+                                        resp_cl = client.chat.complete(
                                             model="mistral-small-latest",
-                                            messages=[{"role":"user","content":prompt_sc}],
-                                            max_tokens=400)
-                                        lineas_sc = resp_sc.choices[0].message.content.strip().split("\n")
-                                        for i, item_sc in enumerate(sublote_sc):
-                                            if i < len(lineas_sc):
-                                                tema_ia = lineas_sc[i].split(". ",1)[-1].strip()
-                                                # Validar que el tema existe
-                                                if tema_ia in temas_disponibles:
-                                                    # Reemplazar "Sin clasificar" por el tema IA
-                                                    for fila_q in filas_cual:
-                                                        if (fila_q["Texto"][:120] == item_sc["Texto"][:120]
-                                                                and fila_q["Tema"] == "Sin clasificar"):
-                                                            fila_q["Tema"] = f"{tema_ia} (IA)"
-                                                            break
-                                                    sin_clasificar_enc = [
-                                                        s for s in sin_clasificar_enc
-                                                        if s["Texto"] != item_sc["Texto"]]
+                                            messages=[{"role": "user", "content": prompt_cl}],
+                                            max_tokens=100)
+                                        lineas_cl = resp_cl.choices[0].message.content.strip().split("\n")
+                                        for i, reg in enumerate(lote):
+                                            if i >= len(lineas_cl):
+                                                break
+                                            linea = lineas_cl[i].strip()
+                                            # Extraer el número de la línea (ej: "1. 3" → "3")
+                                            num_str = linea.split(".")[-1].strip()
+                                            try:
+                                                num = int(num_str)
+                                                if 1 <= num <= len(temas_disponibles):
+                                                    reg["Tema"] = temas_disponibles[num - 1] + " (IA)"
+                                            except (ValueError, IndexError):
+                                                pass  # queda Sin clasificar
                                     except Exception:
-                                        pass
+                                        pass  # lote falla → quedan Sin clasificar
 
+                        # Paso 4: construir filas_cual y sin_clasificar_enc
+                        for reg in registros_cual:
+                            filas_cual.append({
+                                "Grupo":    reg["Grupo"],
+                                "Proyecto": reg["Proyecto"],
+                                "Columna":  reg["Columna"],
+                                "Tema":     reg["Tema"],
+                                "Texto":    reg["Texto"][:200]})
+                            if reg["Tema"] == "Sin clasificar":
+                                sin_clasificar_enc.append({
+                                    "Grupo":   reg["Grupo"],
+                                    "Columna": reg["Columna"],
+                                    "Texto":   reg["Texto"]})
+
+                        # Paso 5: mostrar resultados
                         if filas_cual:
                             df_cual = pd.DataFrame(filas_cual)
-                            top_temas = (df_cual[df_cual["Tema"] != "Sin clasificar"]
-                                        ["Tema"].value_counts().head(14).reset_index())
-                            top_temas.columns = ["Tema","Frecuencia"]
+                            clasificados   = df_cual[df_cual["Tema"] != "Sin clasificar"]
+                            n_sin_cl       = (df_cual["Tema"] == "Sin clasificar").sum()
+                            n_ia           = df_cual["Tema"].str.endswith("(IA)").sum()
+                            total_txt      = len(df_cual)
+
+                            st.caption(
+                                f"Total respuestas: {total_txt} | "
+                                f"Clasificadas por palabras clave: {total_txt - n_sin_cl - n_ia} | "
+                                f"Clasificadas por IA: {n_ia} | "
+                                f"Sin clasificar: {n_sin_cl}")
+
+                            top_temas = (clasificados["Tema"].str.replace(" (IA)", "", regex=False)
+                                        .value_counts().head(14).reset_index())
+                            top_temas.columns = ["Tema", "Frecuencia"]
                             fig_t = px.bar(top_temas, x="Frecuencia", y="Tema",
                                           orientation="h",
                                           title="Temas más frecuentes en respuestas abiertas",
                                           color="Frecuencia", color_continuous_scale="Blues")
                             fig_t.update_layout(yaxis=dict(autorange="reversed"))
                             st.plotly_chart(fig_t, use_container_width=True)
+
                             if sin_clasificar_enc:
-                                with st.expander(f"⚠️ {len(sin_clasificar_enc)} respuestas aún Sin clasificar (después de IA)"):
+                                with st.expander(
+                                        f"⚠️ {len(sin_clasificar_enc)} respuestas Sin clasificar "
+                                        f"({len(sin_clasificar_enc)*100//total_txt}% del total)"):
                                     st.dataframe(pd.DataFrame(sin_clasificar_enc),
                                                  use_container_width=True)
-                                    st.caption("Estas respuestas no coincidieron con ningún tema conocido. Puedes clasificarlas manualmente en el Excel descargado (hoja 5_Abiertas).")
+                                    st.caption(
+                                        "Estas respuestas son muy cortas, muy genéricas o "
+                                        "mencionan temas fuera del diccionario. "
+                                        "Puedes reclasificarlas manualmente en la hoja "
+                                        "5_Abiertas del Excel descargado.")
 
                     # ── Fase 4: Informe IA ────────────────────────
                     st.subheader("📄 Fase 4 — Informe ejecutivo IA")
