@@ -6,6 +6,7 @@ import hashlib
 import json
 import base64
 import requests
+import unicodedata
 import streamlit as st
 
 # ── INICIALIZAR SESSION STATE ─────────────────────────────────────
@@ -253,6 +254,16 @@ def detectar_subregistro(df, cols_texto=None):
         alertas.append("✅ No se detectaron señales evidentes de subregistro.")
     return alertas
 
+def normalizar_str(texto):
+    """Convierte a minúsculas y elimina tildes/acentos para comparación robusta.
+    Ej: 'Raíces del Futuro' → 'raices del futuro'"""
+    texto = str(texto).strip().lower()
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', texto)
+        if unicodedata.category(c) != 'Mn'
+    )
+
+
 def normalizar_linea(texto):
     texto_lower = str(texto).lower().strip()
     for linea in LINEAS_CANONICAS:
@@ -425,7 +436,11 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
     grupo_meta = {}   # {grupo: {col_name: col_idx, '_sheet': str, '_nrows': int}}
 
     for grupo, df_g in dfs_ok.items():
-        sname = f"1_{grupo[:9]}"
+        # Nombre de hoja sin tildes ni caracteres especiales
+        sname_safe = f"1_{grupo[:9]}".replace("á","a").replace("é","e")\
+            .replace("í","i").replace("ó","o").replace("ú","u")\
+            .replace("ñ","n").replace(" ","_")
+        sname = sname_safe
         ws_g = wb.create_sheet(sname)
         cols_g = list(df_g.columns)
         col_map = {}
@@ -713,9 +728,17 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
             xlsx_header(ws_ab.cell(1, ci))
             ws_ab.cell(1, ci).value = h
 
-        temas_lista = list(KEYWORDS_TEMAS.keys()) + ["Sin clasificar"]
+        # DataValidation: máx ~255 chars en la fórmula de lista
+        # Usar solo los primeros temas para no corromper el Excel
+        temas_lista = list(KEYWORDS_TEMAS.keys())[:8] + ["Sin clasificar"]
         temas_str = ",".join(temas_lista)
-        # El rango E2:E5000 cubre hasta 5000 respuestas — evita el error de Excel
+        # Verificar longitud (Excel tiene límite de ~255 caracteres)
+        if len(temas_str) > 250:
+            temas_lista = ["Agua y medio ambiente","Liderazgo y organización",
+                           "Educación y formación","Infraestructura",
+                           "Continuidad y sostenibilidad","Mejora y sugerencias",
+                           "Percepción positiva empresa","Sin clasificar"]
+            temas_str = ",".join(temas_lista)
         dv_temas = DataValidation(type="list", formula1=f'"{temas_str}"',
                                   showErrorMessage=False, sqref="E2:E5000")
         ws_ab.add_data_validation(dv_temas)
@@ -1266,10 +1289,10 @@ if modo == "📋 Encuesta":
                                 st.info(f"ℹ️ **Aliados:** {n_pers} personas únicas, "
                                         f"{len(df_v)} evaluaciones (col: '{posibles_id[0]}')")
                         if proy_lista and pdet:
-                            det_s_lower = set(str(k).strip().lower() for k in pdet)
-                            esp_s_lower = set(p.strip().lower() for p in proy_lista)
-                            det_orig = {str(k).strip().lower(): str(k).strip() for k in pdet}
-                            esp_orig = {p.strip().lower(): p.strip() for p in proy_lista}
+                            det_s_lower = set(normalizar_str(k) for k in pdet)
+                            esp_s_lower = set(normalizar_str(p) for p in proy_lista)
+                            det_orig = {normalizar_str(k): str(k).strip() for k in pdet}
+                            esp_orig = {normalizar_str(p): p.strip() for p in proy_lista}
                             solo_datos = det_s_lower - esp_s_lower
                             solo_lista = esp_s_lower - det_s_lower
                             if solo_datos:
@@ -1326,7 +1349,7 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        raw = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cl]
+                                        raw = df_g[df_g[col_proy].astype(str).str.strip().apply(normalizar_str)==normalizar_str(proy)][cl]
                                     else:
                                         raw = df_g[cl]
                                     sub = raw.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
@@ -1368,7 +1391,7 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        raw_hm = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cl]
+                                        raw_hm = df_g[df_g[col_proy].astype(str).str.strip().apply(normalizar_str)==normalizar_str(proy)][cl]
                                     else:
                                         raw_hm = df_g[cl]
                                     sub_hm = raw_hm.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
@@ -1397,7 +1420,7 @@ if modo == "📋 Encuesta":
                                     if cs not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        sub_sn = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cs].dropna()
+                                        sub_sn = df_g[df_g[col_proy].astype(str).str.strip().apply(normalizar_str)==normalizar_str(proy)][cs].dropna()
                                     else:
                                         sub_sn = df_g[cs].dropna()
                                     if len(sub_sn)>0:
@@ -1419,7 +1442,7 @@ if modo == "📋 Encuesta":
                                     continue
                                 if col_proy and col_proy in df_g.columns:
                                     sub_cal = pd.to_numeric(
-                                        df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][col_cal],
+                                        df_g[df_g[col_proy].astype(str).str.strip().apply(normalizar_str)==normalizar_str(proy)][col_cal],
                                         errors="coerce").dropna()
                                 else:
                                     sub_cal = pd.to_numeric(df_g[col_cal],errors="coerce").dropna()
@@ -1441,7 +1464,7 @@ if modo == "📋 Encuesta":
                                     if cl not in df_g.columns:
                                         continue
                                     if col_proy and col_proy in df_g.columns:
-                                        raw_t = df_g[df_g[col_proy].astype(str).str.strip().str.lower()==str(proy).strip().lower()][cl]
+                                        raw_t = df_g[df_g[col_proy].astype(str).str.strip().apply(normalizar_str)==normalizar_str(proy)][cl]
                                     else:
                                         raw_t = df_g[cl]
                                     sub_t = raw_t.apply(lambda x: texto_a_likert(x, esc_max)).dropna()
