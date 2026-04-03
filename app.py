@@ -226,7 +226,7 @@ def generar_informe_ia(resumen_datos, contexto):
     try:
         resp = client.chat.complete(model="mistral-large-latest",
                                     messages=[{"role":"user","content":prompt}],
-                                    max_tokens=1500)
+                                    max_tokens=2500)
         return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {e}"
@@ -1532,13 +1532,17 @@ if modo == "📋 Encuesta":
                                         f"{i+1}. {r['Texto'][:150]}"
                                         for i, r in enumerate(lote))
                                     prompt_cl = (
+                                        "Eres un experto en análisis de inversión social comunitaria.\n"
                                         "Tienes esta lista de temas numerados:\n"
                                         + temas_str_lk + "\n\n"
                                         "Para cada respuesta, escribe SOLO el número del tema "
-                                        "que mejor corresponda. Si ninguno aplica, escribe 0.\n\n"
+                                        "que mejor corresponda.\n"
+                                        "IMPORTANTE: siempre elige el tema más cercano. "
+                                        "Nunca escribas 0 — si la respuesta es corta o vaga, "
+                                        "asigna el tema más probable en contexto de proyectos comunitarios.\n\n"
                                         "Respuestas:\n" + textos_lote + "\n\n"
-                                        "Formato de respuesta (una línea por respuesta):\n"
-                                        "1. 3\n2. 7\n3. 0\nSolo el número, sin explicaciones.")
+                                        "Una línea por respuesta, solo el número:\n"
+                                        "1. 3\n2. 7\n3. 12\nSolo el número, sin explicaciones.")
                                     try:
                                         resp_cl = client.chat.complete(
                                             model="mistral-small-latest",
@@ -1555,8 +1559,17 @@ if modo == "📋 Encuesta":
                                                 num = int(num_str)
                                                 if 1 <= num <= len(temas_disponibles):
                                                     reg["Tema"] = temas_disponibles[num - 1] + " (IA)"
+                                                else:
+                                                    # 0 o fuera de rango: asignar "Mejora y sugerencias"
+                                                    reg["Tema"] = "Mejora y sugerencias (IA)"
                                             except (ValueError, IndexError):
-                                                pass  # queda Sin clasificar
+                                                # Respuesta no numérica: intentar parsear texto
+                                                for t in temas_disponibles:
+                                                    if normalizar_str(t) in normalizar_str(num_str):
+                                                        reg["Tema"] = t + " (IA)"
+                                                        break
+                                                else:
+                                                    reg["Tema"] = "Mejora y sugerencias (IA)"
                                     except Exception:
                                         pass  # lote falla → quedan Sin clasificar
 
