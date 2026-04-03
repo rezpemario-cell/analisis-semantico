@@ -788,10 +788,11 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
                         proy_ab = ""
                         if col_proy and col_proy in df_g.columns:
                             proy_ab = str(row_ab.get(col_proy, ""))
+                        # Usar normalizar_str para eliminar tildes — igual que la app
                         tema_sug = "Sin clasificar"
-                        txt_low = txt.lower()
+                        txt_norm = normalizar_str(txt)
                         for tema_k, pals in KEYWORDS_TEMAS.items():
-                            if any(p in txt_low for p in pals):
+                            if any(normalizar_str(p) in txt_norm for p in pals):
                                 tema_sug = tema_k
                                 break
                         ws_ab.cell(ri_ab, 1).value = gr
