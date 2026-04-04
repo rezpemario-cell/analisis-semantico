@@ -2420,14 +2420,32 @@ elif modo == "🗺️ Cartografía Social":
                         f"⚠️ **{comp_a}** tiene baja cohesión semántica ({coh_a}) — "
                         f"las frases de este componente son muy diversas entre sí."
                     )
-            # Dispersión: componentes con demasiados grupos
+            # Dispersión: componentes con demasiados grupos — con detalle de grupos y veredas
             for comp_a2 in comp_f:
-                n_grupos = df_fil[df_fil["componente"]==comp_a2]["grupo"].nunique()
-                total_frases_a = len(df_fil[df_fil["componente"]==comp_a2])
+                sub_a2 = df_fil[df_fil["componente"]==comp_a2]
+                n_grupos = sub_a2["grupo"].nunique()
+                total_frases_a = len(sub_a2)
                 if total_frases_a > 0 and n_grupos / total_frases_a > umbral_alta_dispersion:
+                    # Grupos con menos frases (más dispersos)
+                    grupos_pequeños = sub_a2["grupo"].value_counts()
+                    grupos_detalle = ", ".join([f"{g} ({c} frases)" 
+                                               for g, c in grupos_pequeños.items()])
+                    # Veredas con mayor dispersión interna
+                    if "vereda" in sub_a2.columns:
+                        veredas_disp = []
+                        for ver_d in sub_a2["vereda"].dropna().unique():
+                            n_g_ver = sub_a2[sub_a2["vereda"]==ver_d]["grupo"].nunique()
+                            n_f_ver = len(sub_a2[sub_a2["vereda"]==ver_d])
+                            if n_f_ver > 0 and n_g_ver / n_f_ver > umbral_alta_dispersion:
+                                veredas_disp.append(f"{ver_d} ({n_g_ver} grupos, {n_f_ver} frases)")
+                        veredas_txt = (f" Veredas con mayor dispersión: {', '.join(veredas_disp)}."
+                                      if veredas_disp else "")
+                    else:
+                        veredas_txt = ""
                     alertas_auto.append(
                         f"⚠️ **{comp_a2}** tiene alta dispersión ({n_grupos} grupos para "
-                        f"{total_frases_a} frases) — la comunidad tiene visiones muy variadas."
+                        f"{total_frases_a} frases) — la comunidad tiene visiones muy variadas. "
+                        f"Grupos: {grupos_detalle}.{veredas_txt}"
                     )
             if alertas_auto:
                 for alerta in alertas_auto:
@@ -2477,48 +2495,50 @@ elif modo == "🗺️ Cartografía Social":
                             use_container_width=True)
 
             # ── DETECCIÓN DE CONTRADICCIONES ─────────────────────
-            st.subheader("⚡ Detección de contradicciones por vereda")
-            st.caption("Identifica cuando una vereda expresa ideas opuestas sobre el mismo tema. "
-                       "Se detecta comparando frases del mismo componente con baja similitud semántica.")
+            st.subheader("⚡ Detección de tensiones internas por vereda")
+            st.caption("Identifica cuando una vereda expresa ideas opuestas sobre el MISMO tema. "
+                       "Se comparan frases del mismo grupo semántico con baja similitud — "
+                       "frases de grupos diferentes no se comparan porque hablan de temas distintos.")
             if "vereda" in df_fil.columns:
                 contradicciones = []
-                umbral_contradiccion = 0.30
+                umbral_contradiccion = 0.35
                 for comp_ct in comp_f:
                     sub_ct = df_fil[df_fil["componente"]==comp_ct]
-                    for ver_ct in sub_ct["vereda"].dropna().unique():
-                        frases_ct = sub_ct[sub_ct["vereda"]==ver_ct]["frase"].tolist()
-                        if len(frases_ct) >= 3:
-                            vecs_ct = modelo.encode(frases_ct, show_progress_bar=False)
-                            sims_ct = cosine_similarity(vecs_ct)
-                            n_ct = len(vecs_ct)
-                            # Buscar pares con baja similitud (posibles contradicciones)
-                            for i_ct in range(n_ct):
-                                for j_ct in range(i_ct+1, n_ct):
-                                    if sims_ct[i_ct][j_ct] < umbral_contradiccion:
-                                        contradicciones.append({
-                                            "Vereda": ver_ct,
-                                            "Componente": comp_ct,
-                                            "Frase 1": frases_ct[i_ct][:80] + "..." if len(frases_ct[i_ct]) > 80 else frases_ct[i_ct],
-                                            "Frase 2": frases_ct[j_ct][:80] + "..." if len(frases_ct[j_ct]) > 80 else frases_ct[j_ct],
-                                            "Similitud": round(float(sims_ct[i_ct][j_ct]), 3)
-                                        })
+                    for grupo_ct in sub_ct["grupo"].dropna().unique():
+                        sub_g_ct = sub_ct[sub_ct["grupo"]==grupo_ct]
+                        for ver_ct in sub_g_ct["vereda"].dropna().unique():
+                            frases_ct = sub_g_ct[sub_g_ct["vereda"]==ver_ct]["frase"].tolist()
+                            if len(frases_ct) >= 2:
+                                vecs_ct = modelo.encode(frases_ct, show_progress_bar=False)
+                                sims_ct = cosine_similarity(vecs_ct)
+                                n_ct = len(vecs_ct)
+                                for i_ct in range(n_ct):
+                                    for j_ct in range(i_ct+1, n_ct):
+                                        if sims_ct[i_ct][j_ct] < umbral_contradiccion:
+                                            contradicciones.append({
+                                                "Vereda": ver_ct,
+                                                "Componente": comp_ct,
+                                                "Grupo": grupo_ct,
+                                                "Frase 1": frases_ct[i_ct][:90] + "..." if len(frases_ct[i_ct]) > 90 else frases_ct[i_ct],
+                                                "Frase 2": frases_ct[j_ct][:90] + "..." if len(frases_ct[j_ct]) > 90 else frases_ct[j_ct],
+                                                "Similitud": round(float(sims_ct[i_ct][j_ct]), 3)
+                                            })
                 if contradicciones:
                     df_cont = pd.DataFrame(contradicciones).sort_values("Similitud")
-                    # Mostrar solo las 10 contradicciones más fuertes
-                    st.write(f"Se detectaron **{len(df_cont)}** posibles tensiones o contradicciones. "
+                    st.write(f"Se detectaron **{len(df_cont)}** posibles tensiones dentro del mismo tema. "
                              f"Mostrando las {min(10, len(df_cont))} más significativas:")
                     for _, row_ct in df_cont.head(10).iterrows():
                         with st.expander(f"⚡ {row_ct['Vereda']} — {row_ct['Componente']} "
-                                        f"(similitud: {row_ct['Similitud']})"):
+                                        f"/ {row_ct['Grupo']} (similitud: {row_ct['Similitud']})"):
                             col_ct1, col_ct2 = st.columns(2)
                             with col_ct1:
                                 st.info(f"**Postura 1:** {row_ct['Frase 1']}")
                             with col_ct2:
                                 st.warning(f"**Postura 2:** {row_ct['Frase 2']}")
                 else:
-                    st.success("✅ No se detectaron contradicciones significativas entre frases de la misma vereda.")
+                    st.success("✅ No se detectaron tensiones internas significativas dentro de los mismos temas.")
             else:
-                st.info("ℹ️ No hay columna 'vereda' disponible para detectar contradicciones.")
+                st.info("ℹ️ No hay columna 'vereda' disponible para detectar tensiones.")
 
             # ── Frases representativas ────────────────────────────
             st.subheader("💬 Frases más representativas")
