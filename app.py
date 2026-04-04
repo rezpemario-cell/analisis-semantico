@@ -2406,6 +2406,120 @@ elif modo == "🗺️ Cartografía Social":
             resumen_exec.columns = ["Componente","Total frases","Cohesión semántica","Porcentaje"]
             st.dataframe(resumen_exec, use_container_width=True)
 
+
+            # ── ALERTAS AUTOMÁTICAS ───────────────────────────────
+            st.subheader("🚨 Alertas automáticas")
+            alertas_auto = []
+            umbral_baja_cohesion = 0.65
+            umbral_alta_dispersion = 0.15
+            for _, row_a in resumen_exec.iterrows():
+                comp_a = row_a["Componente"]
+                coh_a = row_a["Cohesión semántica"]
+                if coh_a < umbral_baja_cohesion:
+                    alertas_auto.append(
+                        f"⚠️ **{comp_a}** tiene baja cohesión semántica ({coh_a}) — "
+                        f"las frases de este componente son muy diversas entre sí."
+                    )
+            # Dispersión: componentes con demasiados grupos
+            for comp_a2 in comp_f:
+                n_grupos = df_fil[df_fil["componente"]==comp_a2]["grupo"].nunique()
+                total_frases_a = len(df_fil[df_fil["componente"]==comp_a2])
+                if total_frases_a > 0 and n_grupos / total_frases_a > umbral_alta_dispersion:
+                    alertas_auto.append(
+                        f"⚠️ **{comp_a2}** tiene alta dispersión ({n_grupos} grupos para "
+                        f"{total_frases_a} frases) — la comunidad tiene visiones muy variadas."
+                    )
+            if alertas_auto:
+                for alerta in alertas_auto:
+                    st.warning(alerta)
+            else:
+                st.success("✅ No se detectaron alertas en este análisis.")
+
+            # ── ÍNDICE DE CONSENSO POR GRUPO ─────────────────────
+            st.subheader("🤝 Índice de consenso por grupo")
+            st.caption("Mide qué tan de acuerdo está la comunidad dentro de cada grupo semántico. "
+                       "Un índice alto (cerca de 1) indica alta cohesión y consenso.")
+            consenso_data = []
+            for comp_cs in comp_f:
+                sub_cs = df_fil[df_fil["componente"]==comp_cs]
+                for grupo_cs in sub_cs["grupo"].dropna().unique():
+                    sub_g = sub_cs[sub_cs["grupo"]==grupo_cs]
+                    if len(sub_g) >= 2:
+                        vecs_g = modelo.encode(sub_g["frase"].tolist(), show_progress_bar=False)
+                        sims_g = cosine_similarity(vecs_g)
+                        # Promedio de similitudes entre pares (excluyendo diagonal)
+                        n = len(vecs_g)
+                        suma = (sims_g.sum() - n) / (n * (n - 1)) if n > 1 else 1.0
+                        consenso_data.append({
+                            "Componente": comp_cs,
+                            "Grupo": grupo_cs,
+                            "Frases": len(sub_g),
+                            "Índice consenso": round(float(suma), 3)
+                        })
+                    elif len(sub_g) == 1:
+                        consenso_data.append({
+                            "Componente": comp_cs,
+                            "Grupo": grupo_cs,
+                            "Frases": 1,
+                            "Índice consenso": 1.0
+                        })
+            if consenso_data:
+                df_consenso = pd.DataFrame(consenso_data)
+                fig_cons = px.bar(df_consenso, x="Grupo", y="Índice consenso",
+                                 color="Componente", barmode="group",
+                                 facet_col="Componente", facet_col_wrap=3,
+                                 title="Índice de consenso por grupo semántico",
+                                 color_discrete_sequence=px.colors.qualitative.Set2)
+                fig_cons.update_layout(height=500, showlegend=False)
+                fig_cons.update_yaxes(range=[0, 1])
+                st.plotly_chart(fig_cons, use_container_width=True)
+                st.dataframe(df_consenso.sort_values("Índice consenso"), 
+                            use_container_width=True)
+
+            # ── DETECCIÓN DE CONTRADICCIONES ─────────────────────
+            st.subheader("⚡ Detección de contradicciones por vereda")
+            st.caption("Identifica cuando una vereda expresa ideas opuestas sobre el mismo tema. "
+                       "Se detecta comparando frases del mismo componente con baja similitud semántica.")
+            if "vereda" in df_fil.columns:
+                contradicciones = []
+                umbral_contradiccion = 0.30
+                for comp_ct in comp_f:
+                    sub_ct = df_fil[df_fil["componente"]==comp_ct]
+                    for ver_ct in sub_ct["vereda"].dropna().unique():
+                        frases_ct = sub_ct[sub_ct["vereda"]==ver_ct]["frase"].tolist()
+                        if len(frases_ct) >= 3:
+                            vecs_ct = modelo.encode(frases_ct, show_progress_bar=False)
+                            sims_ct = cosine_similarity(vecs_ct)
+                            n_ct = len(vecs_ct)
+                            # Buscar pares con baja similitud (posibles contradicciones)
+                            for i_ct in range(n_ct):
+                                for j_ct in range(i_ct+1, n_ct):
+                                    if sims_ct[i_ct][j_ct] < umbral_contradiccion:
+                                        contradicciones.append({
+                                            "Vereda": ver_ct,
+                                            "Componente": comp_ct,
+                                            "Frase 1": frases_ct[i_ct][:80] + "..." if len(frases_ct[i_ct]) > 80 else frases_ct[i_ct],
+                                            "Frase 2": frases_ct[j_ct][:80] + "..." if len(frases_ct[j_ct]) > 80 else frases_ct[j_ct],
+                                            "Similitud": round(float(sims_ct[i_ct][j_ct]), 3)
+                                        })
+                if contradicciones:
+                    df_cont = pd.DataFrame(contradicciones).sort_values("Similitud")
+                    # Mostrar solo las 10 contradicciones más fuertes
+                    st.write(f"Se detectaron **{len(df_cont)}** posibles tensiones o contradicciones. "
+                             f"Mostrando las {min(10, len(df_cont))} más significativas:")
+                    for _, row_ct in df_cont.head(10).iterrows():
+                        with st.expander(f"⚡ {row_ct['Vereda']} — {row_ct['Componente']} "
+                                        f"(similitud: {row_ct['Similitud']})"):
+                            col_ct1, col_ct2 = st.columns(2)
+                            with col_ct1:
+                                st.info(f"**Postura 1:** {row_ct['Frase 1']}")
+                            with col_ct2:
+                                st.warning(f"**Postura 2:** {row_ct['Frase 2']}")
+                else:
+                    st.success("✅ No se detectaron contradicciones significativas entre frases de la misma vereda.")
+            else:
+                st.info("ℹ️ No hay columna 'vereda' disponible para detectar contradicciones.")
+
             # ── Frases representativas ────────────────────────────
             st.subheader("💬 Frases más representativas")
             for comp_fr2 in comp_f:
