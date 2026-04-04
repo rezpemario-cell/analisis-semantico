@@ -9,3 +9,5 @@ numpy
 scipy
 altair==5.4.1
 mistralai==1.0.0
+networkx
+wordcloud
