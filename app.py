@@ -1297,6 +1297,159 @@ def crear_excel_cartografia_formulas(df_filtrado, comp_filtro, cat_por_component
                     ws_cver.cell(ri_cver, 3).alignment = Alignment(wrap_text=True,vertical="top")
                     ri_cver += 1
 
+    # ── Alertas automáticas ──────────────────────────────────────
+    ws_al = wb.create_sheet("Alertas automaticas")
+    al_hdrs = ["Tipo", "Componente", "Detalle", "Grupos afectados", "Veredas afectadas"]
+    for ci, h in enumerate(al_hdrs, 1):
+        xlsx_header(ws_al.cell(1, ci))
+        ws_al.cell(1, ci).value = h
+        ws_al.column_dimensions[get_column_letter(ci)].width = (14 if ci==1 else (22 if ci==2 else 50))
+    ri_al = 2
+    umbral_baja_coh = 0.65
+    umbral_disp = 0.15
+    for _, row_al in resumen_exec.iterrows():
+        comp_al = row_al["Componente"]
+        coh_al = row_al["Cohesión semántica"]
+        if coh_al < umbral_baja_coh:
+            ws_al.cell(ri_al, 1).value = "Baja cohesión"
+            ws_al.cell(ri_al, 2).value = comp_al
+            ws_al.cell(ri_al, 3).value = f"Cohesión {coh_al} — frases muy diversas entre sí"
+            for ci in range(1, 6):
+                xlsx_data(ws_al.cell(ri_al, ci))
+            ri_al += 1
+    for comp_al2 in comp_filtro:
+        sub_al = df_filtrado[df_filtrado["componente"]==comp_al2]
+        n_g_al = sub_al["grupo"].nunique()
+        n_f_al = len(sub_al)
+        if n_f_al > 0 and n_g_al / n_f_al > umbral_disp:
+            grupos_det = "; ".join([f"{g} ({c} fr.)" for g, c in
+                                    sub_al["grupo"].value_counts().items()])
+            veredas_det = ""
+            if "vereda" in sub_al.columns:
+                vd = []
+                for ver_al in sub_al["vereda"].dropna().unique():
+                    ng_v = sub_al[sub_al["vereda"]==ver_al]["grupo"].nunique()
+                    nf_v = len(sub_al[sub_al["vereda"]==ver_al])
+                    if nf_v > 0 and ng_v / nf_v > umbral_disp:
+                        vd.append(f"{ver_al} ({ng_v} gr., {nf_v} fr.)")
+                veredas_det = "; ".join(vd)
+            ws_al.cell(ri_al, 1).value = "Alta dispersión"
+            ws_al.cell(ri_al, 2).value = comp_al2
+            ws_al.cell(ri_al, 3).value = f"{n_g_al} grupos para {n_f_al} frases — visiones muy variadas"
+            ws_al.cell(ri_al, 4).value = grupos_det
+            ws_al.cell(ri_al, 5).value = veredas_det
+            for ci in range(1, 6):
+                xlsx_data(ws_al.cell(ri_al, ci))
+                ws_al.cell(ri_al, ci).alignment = Alignment(wrap_text=True, vertical="top")
+            ri_al += 1
+    if ri_al == 2:
+        ws_al.cell(2, 1).value = "✅ No se detectaron alertas"
+        xlsx_data(ws_al.cell(2, 1))
+
+    # ── Índice de consenso ────────────────────────────────────────
+    ws_con = wb.create_sheet("Indice de consenso")
+    con_hdrs = ["Componente", "Grupo", "Frases", "Índice consenso", "Interpretación"]
+    for ci, h in enumerate(con_hdrs, 1):
+        xlsx_header(ws_con.cell(1, ci))
+        ws_con.cell(1, ci).value = h
+        ws_con.column_dimensions[get_column_letter(ci)].width = (24 if ci in [1,2,5] else 14)
+    ri_con = 2
+    for comp_cs in comp_filtro:
+        sub_cs = df_filtrado[df_filtrado["componente"]==comp_cs]
+        for grupo_cs in sub_cs["grupo"].dropna().unique():
+            sub_g = sub_cs[sub_cs["grupo"]==grupo_cs]
+            if len(sub_g) >= 2:
+                vecs_g = modelo.encode(sub_g["frase"].tolist(), show_progress_bar=False)
+                sims_g = cosine_similarity(vecs_g)
+                n = len(vecs_g)
+                idx = round(float((sims_g.sum() - n) / (n * (n - 1))), 3)
+            else:
+                idx = 1.0
+            interp = ("🟢 Alto consenso" if idx >= 0.7
+                      else ("🟡 Consenso medio" if idx >= 0.5 else "🔴 Bajo consenso"))
+            ws_con.cell(ri_con, 1).value = comp_cs
+            ws_con.cell(ri_con, 2).value = grupo_cs
+            ws_con.cell(ri_con, 3).value = len(sub_g)
+            ws_con.cell(ri_con, 4).value = idx
+            ws_con.cell(ri_con, 5).value = interp
+            for ci in range(1, 6):
+                xlsx_data(ws_con.cell(ri_con, ci))
+            ri_con += 1
+    n_con = ri_con - 2
+    semaforo_cf(ws_con, f"D2:D{ri_con-1}", "D",
+        verde_formula   = "D2>=0.7",
+        amarillo_formula = "AND(D2>=0.5,D2<0.7)",
+        rojo_formula    = "AND(ISNUMBER(D2),D2<0.5)")
+
+    # ── Tensiones internas ────────────────────────────────────────
+    ws_ten = wb.create_sheet("Tensiones internas")
+    ten_hdrs = ["Vereda", "Componente", "Grupo", "Frase 1", "Frase 2", "Similitud"]
+    for ci, h in enumerate(ten_hdrs, 1):
+        xlsx_header(ws_ten.cell(1, ci))
+        ws_ten.cell(1, ci).value = h
+        ws_ten.column_dimensions[get_column_letter(ci)].width = (18 if ci<=3 else (55 if ci<=5 else 12))
+    ri_ten = 2
+    if "vereda" in df_filtrado.columns:
+        umbral_ct = 0.35
+        tensiones_xl = []
+        for comp_ct in comp_filtro:
+            sub_ct = df_filtrado[df_filtrado["componente"]==comp_ct]
+            for grupo_ct in sub_ct["grupo"].dropna().unique():
+                sub_g_ct = sub_ct[sub_ct["grupo"]==grupo_ct]
+                for ver_ct in sub_g_ct["vereda"].dropna().unique():
+                    fr_ct = sub_g_ct[sub_g_ct["vereda"]==ver_ct]["frase"].tolist()
+                    if len(fr_ct) >= 2:
+                        vecs_ct = modelo.encode(fr_ct, show_progress_bar=False)
+                        sims_ct = cosine_similarity(vecs_ct)
+                        for i_ct in range(len(fr_ct)):
+                            for j_ct in range(i_ct+1, len(fr_ct)):
+                                if sims_ct[i_ct][j_ct] < umbral_ct:
+                                    tensiones_xl.append({
+                                        "ver": ver_ct, "comp": comp_ct, "grp": grupo_ct,
+                                        "f1": fr_ct[i_ct], "f2": fr_ct[j_ct],
+                                        "sim": round(float(sims_ct[i_ct][j_ct]), 3)
+                                    })
+        tensiones_xl.sort(key=lambda x: x["sim"])
+        for t in tensiones_xl[:50]:  # max 50 tensiones en Excel
+            ws_ten.cell(ri_ten, 1).value = t["ver"]
+            ws_ten.cell(ri_ten, 2).value = t["comp"]
+            ws_ten.cell(ri_ten, 3).value = t["grp"]
+            ws_ten.cell(ri_ten, 4).value = t["f1"]
+            ws_ten.cell(ri_ten, 5).value = t["f2"]
+            ws_ten.cell(ri_ten, 6).value = t["sim"]
+            for ci in range(1, 7):
+                xlsx_data(ws_ten.cell(ri_ten, ci))
+                if ci >= 4:
+                    ws_ten.cell(ri_ten, ci).alignment = Alignment(wrap_text=True, vertical="top")
+            ri_ten += 1
+    if ri_ten == 2:
+        ws_ten.cell(2, 1).value = "✅ No se detectaron tensiones significativas"
+        xlsx_data(ws_ten.cell(2, 1))
+
+    # ── Comparación entre municipios ──────────────────────────────
+    if "municipio" in df_filtrado.columns and df_filtrado["municipio"].nunique() > 1:
+        ws_mun = wb.create_sheet("Comparacion municipios")
+        mun_hdrs = ["Municipio", "Componente", "Frases", "Cohesión promedio"]
+        for ci, h in enumerate(mun_hdrs, 1):
+            xlsx_header(ws_mun.cell(1, ci))
+            ws_mun.cell(1, ci).value = h
+            ws_mun.column_dimensions[get_column_letter(ci)].width = 24
+        tabla_mun = df_filtrado.groupby(["municipio","componente"]).agg(
+            Frases=("frase","count"),
+            Cohesion=("peso_semantico","mean")
+        ).round(3).reset_index()
+        for ri_mun, (_, row_mun) in enumerate(tabla_mun.iterrows(), 2):
+            ws_mun.cell(ri_mun, 1).value = row_mun["municipio"]
+            ws_mun.cell(ri_mun, 2).value = row_mun["componente"]
+            ws_mun.cell(ri_mun, 3).value = int(row_mun["Frases"])
+            ws_mun.cell(ri_mun, 4).value = row_mun["Cohesion"]
+            for ci in range(1, 5):
+                xlsx_data(ws_mun.cell(ri_mun, ci))
+        semaforo_cf(ws_mun, f"D2:D{len(tabla_mun)+1}", "D",
+            verde_formula   = "D2>=0.75",
+            amarillo_formula = "AND(D2>=0.55,D2<0.75)",
+            rojo_formula    = "AND(ISNUMBER(D2),D2<0.55)")
+
     return wb
 
 
