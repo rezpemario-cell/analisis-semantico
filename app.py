@@ -1484,12 +1484,51 @@ if modo == "📋 Encuesta":
                                 st.write("Vista numérica:")
                                 st.dataframe(promedios.round(2), use_container_width=True)
 
-                                # % de acuerdo
-                                st.write("% de acuerdo (respuestas con valor máximo):")
+                                # % de acuerdo (valor máximo)
+                                st.write("% de acuerdo (% que respondió el valor máximo):")
                                 df_ac = df_lk.groupby(col_proy)[cols_lk_disp].apply(
                                     lambda g: (g == esc_max).mean() * 100).round(1)
                                 st.dataframe(df_ac.applymap(lambda v: f"{v:.0f}%"
                                     if pd.notna(v) else "—"), use_container_width=True)
+
+                                # Distribución porcentual completa por valor
+                                with st.expander(f"📊 Distribución % por valor de escala — {gr}"):
+                                    st.caption(
+                                        f"Muestra qué % de participantes eligió cada valor "
+                                        f"(1 a {esc_max}) por pregunta y proyecto. "
+                                        f"Útil para detectar consenso (todos eligen el mismo) "
+                                        f"o polarización (respuestas dispersas).")
+                                    for cl in cols_lk_disp:
+                                        st.write(f"**{cl[:80]}**")
+                                        filas_dist = []
+                                        for proy_d in promedios.index:
+                                            mask_d = df_lk[col_proy] == proy_d
+                                            vals_d = df_lk.loc[mask_d, cl].dropna()
+                                            if len(vals_d) == 0:
+                                                continue
+                                            fila_d = {"Proyecto": str(proy_d)[:40],
+                                                      "n": len(vals_d),
+                                                      "Promedio": f"{vals_d.mean():.2f}"}
+                                            for v_esc in range(1, esc_max + 1):
+                                                pct_v = (vals_d == v_esc).mean() * 100
+                                                lbl = {1:"🔴 1", 2:"🟡 2", 3:"🟢 3",
+                                                       4:"🟢 4", 5:"🟢 5"}.get(v_esc, str(v_esc))
+                                                if esc_max == 3:
+                                                    lbl = {1:"🔴 En desacuerdo (1)",
+                                                           2:"🟡 Neutral (2)",
+                                                           3:"🟢 De acuerdo (3)"}.get(v_esc, str(v_esc))
+                                                elif esc_max == 5:
+                                                    lbl = {1:"🔴 Muy en desacuerdo (1)",
+                                                           2:"🟠 En desacuerdo (2)",
+                                                           3:"🟡 Neutral (3)",
+                                                           4:"🟢 De acuerdo (4)",
+                                                           5:"🟢 Muy de acuerdo (5)"}.get(v_esc, str(v_esc))
+                                                fila_d[lbl] = f"{pct_v:.0f}%"
+                                            filas_dist.append(fila_d)
+                                        if filas_dist:
+                                            st.dataframe(
+                                                pd.DataFrame(filas_dist).set_index("Proyecto"),
+                                                use_container_width=True)
 
                                 # Acumular para exportar y triangulación
                                 for proy_g in promedios.index:
