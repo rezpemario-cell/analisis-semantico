@@ -403,6 +403,24 @@ def semaforo_cf(ws, rng, col_ref, verde_formula, amarillo_formula, rojo_formula)
 # ════════════════════════════════════════════════════════════════
 # BUILDER EXCEL — MÓDULO ENCUESTA CON FÓRMULAS
 # ════════════════════════════════════════════════════════════════
+def texto_a_likert_excel(valor, escala_max):
+    """Versión del conversor para uso dentro del Excel builder."""
+    if pd.isna(valor):
+        return np.nan
+    try:
+        n = float(str(valor).strip().replace(",", "."))
+        return n if 1 <= n <= escala_max else np.nan
+    except (ValueError, TypeError):
+        pass
+    mapa3 = {"de acuerdo":3,"si":3,"sí":3,"siempre":3,"totalmente":3,
+              "neutral":2,"a veces":2,"regular":2,
+              "en desacuerdo":1,"no":1,"nunca":1}
+    mapa5 = {"muy de acuerdo":5,"de acuerdo":4,"neutral":3,
+              "en desacuerdo":2,"muy en desacuerdo":1}
+    mapa = mapa5 if escala_max == 5 else mapa3
+    return mapa.get(str(valor).strip().lower(), np.nan)
+
+
 def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
     """
     Crea workbook openpyxl con fórmulas reales para el módulo Encuesta.
@@ -577,6 +595,80 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
             "🔴 Crítico (< 67%)  |  Umbrales se leen automáticamente desde CONFIG")
         ws_lk.cell(nota_lk, 1).font = Font(italic=True, color="777777", name="Calibri")
         ws_lk.freeze_panes = "B2"
+
+    # ── 3b. Distribucion_pct: % por valor Likert ────────────────────
+    if cols_likert and proyectos:
+        ws_pct = wb.create_sheet("Distribucion_pct")
+        escala_vals = list(range(1, escala_max + 1))
+        etiq = {1:"🔴 Valor 1", 2:"🟡 Valor 2", 3:"🟢 Valor 3",
+                4:"🟢 Valor 4", 5:"🟢 Valor 5"}
+        if escala_max == 3:
+            etiq = {1:"En desacuerdo (1)", 2:"Neutral (2)", 3:"De acuerdo (3)"}
+        elif escala_max == 5:
+            etiq = {1:"Muy en desacuerdo (1)", 2:"En desacuerdo (2)",
+                    3:"Neutral (3)", 4:"De acuerdo (4)", 5:"Muy de acuerdo (5)"}
+
+        hdrs_pct = ["Indicador", "Grupo", "Proyecto", "n", "Promedio"]
+        for v in escala_vals:
+            hdrs_pct.append(f"% {etiq.get(v, str(v))}")
+
+        for ci, h in enumerate(hdrs_pct, 1):
+            xlsx_header(ws_pct.cell(1, ci))
+            ws_pct.cell(1, ci).value = h
+            ws_pct.column_dimensions[get_column_letter(ci)].width = (
+                40 if ci == 1 else (16 if ci <= 3 else 12))
+
+        ri_pct = 2
+        for cl_pct in cols_likert:
+            for gr_pct, df_gr_pct in dfs_ok.items():
+                if cl_pct not in df_gr_pct.columns:
+                    continue
+                col_proy_pct = cfg.get("col_proyecto")
+                df_tmp_pct = df_gr_pct.copy()
+                df_tmp_pct[cl_pct] = df_tmp_pct[cl_pct].apply(
+                    lambda x: texto_a_likert_excel(x, escala_max))
+
+                if col_proy_pct and col_proy_pct in df_tmp_pct.columns:
+                    grupos_pct = df_tmp_pct.groupby(col_proy_pct)[cl_pct]
+                else:
+                    grupos_pct = {("(global)", df_tmp_pct[cl_pct])}.items() if False else None
+                    # Análisis global
+                    vals_g = df_tmp_pct[cl_pct].dropna()
+                    if len(vals_g) > 0:
+                        fila_pct = [cl_pct[:60], gr_pct, "(global)", len(vals_g),
+                                    round(vals_g.mean(), 2)]
+                        for v_p in escala_vals:
+                            fila_pct.append(f"{(vals_g == v_p).mean()*100:.0f}%")
+                        for ci, val in enumerate(fila_pct, 1):
+                            ws_pct.cell(ri_pct, ci).value = val
+                            xlsx_data(ws_pct.cell(ri_pct, ci))
+                        ri_pct += 1
+                    continue
+
+                for proy_pct, vals_pct in grupos_pct:
+                    vals_pct_clean = vals_pct.dropna()
+                    if len(vals_pct_clean) == 0:
+                        continue
+                    fila_pct = [cl_pct[:60], gr_pct, str(proy_pct)[:40],
+                                len(vals_pct_clean), round(vals_pct_clean.mean(), 2)]
+                    for v_p in escala_vals:
+                        fila_pct.append(f"{(vals_pct_clean == v_p).mean()*100:.0f}%")
+                    for ci, val in enumerate(fila_pct, 1):
+                        ws_pct.cell(ri_pct, ci).value = val
+                        xlsx_data(ws_pct.cell(ri_pct, ci))
+                    # Semáforo en columna promedio (col 5)
+                    prom_val = vals_pct_clean.mean()
+                    if prom_val >= escala_max * 0.9:
+                        ws_pct.cell(ri_pct, 5).fill = PatternFill(
+                            start_color=C_VERDEBG, end_color=C_VERDEBG, fill_type="solid")
+                    elif prom_val >= escala_max * 0.67:
+                        ws_pct.cell(ri_pct, 5).fill = PatternFill(
+                            start_color=C_AMARILLBG, end_color=C_AMARILLBG, fill_type="solid")
+                    else:
+                        ws_pct.cell(ri_pct, 5).fill = PatternFill(
+                            start_color=C_rojoBG, end_color=C_rojoBG, fill_type="solid")
+                    ri_pct += 1
+        ws_pct.freeze_panes = "D2"
 
     # ── 4. 3_SiNo_Cal: COUNTIFS + AVERAGEIFS calificación ────────
     if (cols_sino or col_cal) and proyectos:
@@ -1282,22 +1374,57 @@ if modo == "📋 Encuesta":
                 st.error(f"Error leyendo {gr}: {e_r}")
 
         if dfs_ok:
+            # Columnas del primer grupo (para col_proy y cols geo que suelen ser comunes)
             cols_ref = list(dfs_ok[list(dfs_ok.keys())[0]].columns)
 
             # ── Configuración de columnas ─────────────────────────
             st.subheader("🗂️ Configuración de columnas")
-            opc_proy  = ["(sin columna de proyecto)"] + cols_ref
-            col_proy  = st.selectbox("Columna que identifica el proyecto:", opc_proy)
-            col_proy  = None if col_proy.startswith("(sin") else col_proy
-            cm1, cm2  = st.columns(2)
-            with cm1:
-                cols_lk  = st.multiselect("Columnas Likert (numéricas):", cols_ref)
-                col_cal  = st.selectbox("Calificación 1-5 (si existe):",
-                                        ["(ninguna)"] + cols_ref)
-                col_cal  = None if col_cal == "(ninguna)" else col_cal
-            with cm2:
-                cols_sn  = st.multiselect("Columnas Sí / No:", cols_ref)
-                cols_txt = st.multiselect("Columnas texto abierto:", cols_ref)
+
+            # Columna de proyecto (debe existir con el mismo nombre en todos los grupos)
+            opc_proy = ["(sin columna de proyecto)"] + cols_ref
+            col_proy = st.selectbox("Columna que identifica el proyecto "
+                                    "(debe tener el mismo nombre en todos los archivos):",
+                                    opc_proy)
+            col_proy = None if col_proy.startswith("(sin") else col_proy
+
+            # ── Un expander por grupo con sus propias columnas ────
+            st.markdown("**Configura las columnas de cada grupo por separado** "
+                        "— cada archivo puede tener preguntas distintas.")
+
+            # Diccionarios: {grupo: [lista de columnas seleccionadas]}
+            cols_lk_por_grupo  = {}
+            cols_sn_por_grupo  = {}
+            cols_txt_por_grupo = {}
+            col_cal_por_grupo  = {}
+
+            for gr_cfg, df_cfg in dfs_ok.items():
+                cols_gr = list(df_cfg.columns)
+                with st.expander(f"📋 Columnas de {gr_cfg}", expanded=True):
+                    cg1, cg2 = st.columns(2)
+                    with cg1:
+                        cols_lk_por_grupo[gr_cfg] = st.multiselect(
+                            f"Likert (numéricas) — {gr_cfg}:",
+                            cols_gr, key=f"lk_{gr_cfg}")
+                        cal_sel = st.selectbox(
+                            f"Calificación 1-5 — {gr_cfg}:",
+                            ["(ninguna)"] + cols_gr, key=f"cal_{gr_cfg}")
+                        col_cal_por_grupo[gr_cfg] = (
+                            None if cal_sel == "(ninguna)" else cal_sel)
+                    with cg2:
+                        cols_sn_por_grupo[gr_cfg] = st.multiselect(
+                            f"Sí / No — {gr_cfg}:",
+                            cols_gr, key=f"sn_{gr_cfg}")
+                        cols_txt_por_grupo[gr_cfg] = st.multiselect(
+                            f"Texto abierto — {gr_cfg}:",
+                            cols_gr, key=f"txt_{gr_cfg}")
+
+            # Para compatibilidad con el resto del código (triangulación usa listas globales)
+            cols_lk  = sorted(set(c for v in cols_lk_por_grupo.values() for c in v))
+            cols_sn  = sorted(set(c for v in cols_sn_por_grupo.values() for c in v))
+            cols_txt = sorted(set(c for v in cols_txt_por_grupo.values() for c in v))
+            col_cal  = next((v for v in col_cal_por_grupo.values() if v), None)
+
+            # Columnas geo (comunes — usar las del primer grupo)
             cm3, cm4 = st.columns(2)
             with cm3:
                 col_muni = st.selectbox("Columna municipio (opcional):",
@@ -1308,7 +1435,7 @@ if modo == "📋 Encuesta":
                 col_ver  = None if col_ver == "(ninguna)" else col_ver
             with cm4:
                 col_part = st.selectbox(
-                    "Columna participantes (si cada fila es UN participante, deja (ninguna)):",
+                    "Columna participantes (deja (ninguna) si cada fila = 1 participante):",
                     ["(ninguna)"] + cols_ref)
                 col_part = None if col_part == "(ninguna)" else col_part
 
@@ -1319,7 +1446,7 @@ if modo == "📋 Encuesta":
                 resumen_val = []
                 for gr_v, df_v in dfs_ok.items():
                     alertas_v = []
-                    for cl_v in cols_lk:
+                    for cl_v in cols_lk_por_grupo.get(gr_v, cols_lk):
                         if cl_v in df_v.columns:
                             col_num_v = pd.to_numeric(df_v[cl_v], errors="coerce")
                             no_num_v  = col_num_v.isna().sum() - df_v[cl_v].isna().sum()
@@ -1465,8 +1592,9 @@ if modo == "📋 Encuesta":
                                         lambda x: texto_a_likert(x, esc_max))
 
                             if col_proy and col_proy in df_lk.columns:
-                                # Agrupar por proyecto — pandas hace el trabajo
-                                cols_lk_disp = [c for c in cols_lk if c in df_lk.columns]
+                                # Usar columnas Likert específicas de este grupo
+                                cols_lk_disp = [c for c in cols_lk_por_grupo.get(gr, cols_lk)
+                                                if c in df_lk.columns]
                                 grp = df_lk.groupby(col_proy)[cols_lk_disp]
                                 promedios = grp.mean()
                                 conteos   = grp.count()
@@ -1564,14 +1692,15 @@ if modo == "📋 Encuesta":
                         st.subheader("✅ Preguntas Sí / No")
                         for gr, df_g in dfs_ok.items():
                             df_sn = df_g.copy()
-                            for cs in cols_sn:
+                            _cols_sn_gr = cols_sn_por_grupo.get(gr, cols_sn)
+                            for cs in _cols_sn_gr:
                                 if cs in df_sn.columns:
                                     df_sn[cs] = df_sn[cs].apply(
                                         lambda x: 1 if str(x).strip().lower()
                                         in ["sí","si","s","1","true","yes"] else (
                                         0 if str(x).strip().lower()
                                         in ["no","n","0","false"] else np.nan))
-                            cols_sn_disp = [c for c in cols_sn if c in df_sn.columns]
+                            cols_sn_disp = [c for c in _cols_sn_gr if c in df_sn.columns]
                             if col_proy and col_proy in df_sn.columns and cols_sn_disp:
                                 pct_sn = (df_sn.groupby(col_proy)[cols_sn_disp]
                                          .mean() * 100).round(1)
@@ -1588,12 +1717,13 @@ if modo == "📋 Encuesta":
                     if col_cal:
                         st.subheader("⭐ Calificación general 1-5")
                         for gr, df_g in dfs_ok.items():
-                            if col_cal not in df_g.columns:
+                            _col_cal_gr = col_cal_por_grupo.get(gr, col_cal)
+                            if not _col_cal_gr or _col_cal_gr not in df_g.columns:
                                 continue
                             df_cal = df_g.copy()
-                            df_cal[col_cal] = pd.to_numeric(df_cal[col_cal], errors="coerce")
+                            df_cal[_col_cal_gr] = pd.to_numeric(df_cal[_col_cal_gr], errors="coerce")
                             if col_proy and col_proy in df_cal.columns:
-                                cal_grp = df_cal.groupby(col_proy)[col_cal].agg(["mean","count"])
+                                cal_grp = df_cal.groupby(col_proy)[_col_cal_gr].agg(["mean","count"])
                                 cal_grp.columns = ["Promedio","n"]
                                 cal_grp["Semáforo"] = cal_grp["Promedio"].apply(semaforo_rating)
                                 st.write(f"**{gr}** — Calificación 1-5 por proyecto:")
@@ -1650,7 +1780,8 @@ if modo == "📋 Encuesta":
                         # Paso 1: recopilar todos los textos con metadata
                         registros_cual = []  # [{idx, gr, ct, proy, texto}]
                         for gr, df_g in dfs_ok.items():
-                            for ct in cols_txt:
+                            _cols_txt_gr = cols_txt_por_grupo.get(gr, cols_txt)
+                            for ct in _cols_txt_gr:
                                 if ct not in df_g.columns:
                                     continue
                                 for idx_row, row_ct in df_g.iterrows():
