@@ -2598,6 +2598,174 @@ elif modo == "🗺️ Cartografía Social":
             st.dataframe(df_fil[df_fil["componente"]==comp_vista][cols_v],
                          use_container_width=True)
 
+
+            # ── RED DE RELACIONES ────────────────────────────────
+            st.subheader("🕸️ Red de relaciones: Componentes y Líneas de inversión")
+            st.caption("Muestra las conexiones entre componentes y líneas de inversión. "
+                       "El grosor de la línea indica la frecuencia de la relación.")
+            try:
+                import networkx as nx
+                import plotly.graph_objects as go
+
+                G = nx.Graph()
+                lineas_canonicas_red = [
+                    "Agua y territorio", "Desarrollo rural",
+                    "Educación y competitividad", "Infraestructura comunitaria",
+                    "Fortalecimiento comunitario"
+                ]
+                # Agregar nodos de componentes
+                for comp_r in comp_f:
+                    G.add_node(comp_r, tipo="componente")
+                # Agregar nodos de líneas
+                for lin_r in lineas_canonicas_red:
+                    G.add_node(lin_r, tipo="linea")
+                # Agregar aristas con peso
+                for _, row_r in df_fil.iterrows():
+                    comp_r = row_r["componente"]
+                    lineas_r = str(row_r.get("lineas_inversion", ""))
+                    for lin_r in lineas_canonicas_red:
+                        if lin_r in lineas_r:
+                            if G.has_edge(comp_r, lin_r):
+                                G[comp_r][lin_r]["weight"] += 1
+                            else:
+                                G.add_edge(comp_r, lin_r, weight=1)
+
+                # Layout circular
+                pos = nx.spring_layout(G, seed=42, k=2)
+
+                # Crear trazas de aristas
+                edge_traces = []
+                for u, v, data in G.edges(data=True):
+                    x0, y0 = pos[u]
+                    x1, y1 = pos[v]
+                    weight = data.get("weight", 1)
+                    edge_traces.append(go.Scatter(
+                        x=[x0, x1, None], y=[y0, y1, None],
+                        mode="lines",
+                        line=dict(width=min(weight/5, 8), color="rgba(100,149,237,0.6)"),
+                        hoverinfo="none"
+                    ))
+
+                # Crear traza de nodos
+                node_x, node_y, node_text, node_color, node_size = [], [], [], [], []
+                for node in G.nodes():
+                    x, y = pos[node]
+                    node_x.append(x)
+                    node_y.append(y)
+                    node_text.append(node)
+                    if G.nodes[node]["tipo"] == "componente":
+                        node_color.append("#2E86AB")
+                        node_size.append(25)
+                    else:
+                        node_color.append("#A23B72")
+                        node_size.append(20)
+
+                node_trace = go.Scatter(
+                    x=node_x, y=node_y,
+                    mode="markers+text",
+                    text=node_text,
+                    textposition="top center",
+                    hoverinfo="text",
+                    marker=dict(size=node_size, color=node_color,
+                               line=dict(width=2, color="white"))
+                )
+
+                fig_red = go.Figure(data=edge_traces + [node_trace],
+                    layout=go.Layout(
+                        title="Red de relaciones Componentes — Líneas de inversión",
+                        showlegend=False,
+                        hovermode="closest",
+                        height=550,
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        annotations=[
+                            dict(x=0.01, y=0.99, xref="paper", yref="paper",
+                                 text="🔵 Componentes  🟣 Líneas de inversión",
+                                 showarrow=False, font=dict(size=12))
+                        ]
+                    )
+                )
+                st.plotly_chart(fig_red, use_container_width=True)
+            except ImportError:
+                st.info("ℹ️ Para ver la red de relaciones instala networkx: pip install networkx")
+
+            # ── NUBE DE PALABRAS ──────────────────────────────────
+            st.subheader("☁️ Nube de palabras por componente")
+            st.caption("Las palabras más frecuentes en las frases de cada componente.")
+            try:
+                from wordcloud import WordCloud
+                import matplotlib.pyplot as plt
+                import matplotlib
+                matplotlib.use("Agg")
+
+                stopwords_es = {
+                    "de", "la", "el", "en", "y", "a", "que", "los", "las", "se",
+                    "un", "una", "con", "del", "por", "para", "es", "son", "no",
+                    "lo", "le", "su", "sus", "al", "como", "más", "pero", "si",
+                    "también", "este", "esta", "hay", "tiene", "tienen", "han",
+                    "ha", "he", "ser", "estar", "muy", "ya", "o", "e", "u", "ni"
+                }
+
+                cols_wc = st.columns(min(3, len(comp_f)))
+                for i_wc, comp_wc in enumerate(comp_f):
+                    frases_wc = df_fil[df_fil["componente"]==comp_wc]["frase"].tolist()
+                    texto_wc = " ".join(frases_wc).lower()
+                    wc = WordCloud(
+                        width=400, height=250,
+                        background_color="white",
+                        stopwords=stopwords_es,
+                        max_words=40,
+                        colormap="Set2",
+                        collocations=False
+                    ).generate(texto_wc)
+                    fig_wc, ax_wc = plt.subplots(figsize=(5, 3))
+                    ax_wc.imshow(wc, interpolation="bilinear")
+                    ax_wc.axis("off")
+                    ax_wc.set_title(comp_wc.upper(), fontsize=10, fontweight="bold")
+                    with cols_wc[i_wc % 3]:
+                        st.pyplot(fig_wc)
+                    plt.close(fig_wc)
+
+            except ImportError:
+                st.info("ℹ️ Para ver nubes de palabras instala wordcloud: agrega 'wordcloud' a requirements.txt")
+
+            # ── COMPARACIÓN ENTRE MUNICIPIOS ──────────────────────
+            if "municipio" in df_fil.columns and df_fil["municipio"].nunique() > 1:
+                st.subheader("🏘️ Comparación entre municipios")
+                st.caption("Análisis diferencial de cohesión semántica y distribución de frases por municipio.")
+
+                municipios_comp = sorted(df_fil["municipio"].dropna().unique())
+                col_mun1, col_mun2 = st.columns(2)
+
+                with col_mun1:
+                    # Cohesión por municipio y componente
+                    coh_mun = df_fil.groupby(["municipio", "componente"])["peso_semantico"].mean().round(3).reset_index()
+                    coh_mun.columns = ["Municipio", "Componente", "Cohesión"]
+                    fig_mun_coh = px.bar(coh_mun, x="Componente", y="Cohesión",
+                                        color="Municipio", barmode="group",
+                                        title="Cohesión semántica por municipio",
+                                        color_discrete_sequence=px.colors.qualitative.Set1)
+                    fig_mun_coh.update_xaxes(tickangle=-30)
+                    st.plotly_chart(fig_mun_coh, use_container_width=True)
+
+                with col_mun2:
+                    # Distribución de frases por municipio y componente
+                    dist_mun = df_fil.groupby(["municipio", "componente"]).size().reset_index(name="Frases")
+                    fig_mun_dist = px.bar(dist_mun, x="Componente", y="Frases",
+                                         color="Municipio", barmode="group",
+                                         title="Participación por municipio",
+                                         color_discrete_sequence=px.colors.qualitative.Set1)
+                    fig_mun_dist.update_xaxes(tickangle=-30)
+                    st.plotly_chart(fig_mun_dist, use_container_width=True)
+
+                # Tabla comparativa
+                tabla_mun = df_fil.groupby(["municipio", "componente"]).agg(
+                    Frases=("frase", "count"),
+                    Cohesion=("peso_semantico", "mean")
+                ).round(3).reset_index()
+                tabla_mun.columns = ["Municipio", "Componente", "Frases", "Cohesión"]
+                st.dataframe(tabla_mun, use_container_width=True)
+
             st.session_state.resultados_cart = df_fil
 
             # ── Descarga Excel con fórmulas ───────────────────────
