@@ -1734,44 +1734,120 @@ if modo == "📋 Encuesta":
                                         "Proyecto": proy_g, "Grupo": gr,
                                         f"Calificación (n={int(row_c['n'])}{av})": row_c["Semáforo"]})
 
-                    # ── Fase 3: Triangulación — usando datos acumulados ─
-                    if cols_lk and len(dfs_ok) >= 2 and filas_consolidado:
+                    # ── Fase 3: Triangulación — con mapeador de equivalencias ─
+                    if len(dfs_ok) >= 2:
                         st.subheader("🔺 Fase 3 — Triangulación entre grupos")
                         umbral_t = 0.5 if esc_max == 3 else 1.0
-                        st.caption(f"Convergencia = diferencia MAX-MIN ≤ {umbral_t}")
 
-                        # Construir tabla pivote: proyecto × grupo → promedio por indicador
-                        for cl in cols_lk:
-                            # Agrupar promedios por proyecto y grupo
-                            datos_tri = {}
-                            for gr, df_g in dfs_ok.items():
-                                if cl not in df_g.columns or not (col_proy and col_proy in df_g.columns):
-                                    continue
-                                df_t = df_g.copy()
-                                df_t[cl] = df_t[cl].apply(lambda x: texto_a_likert(x, esc_max))
-                                for proy_g, v in df_t.groupby(col_proy)[cl].mean().items():
-                                    if pd.notna(v):
-                                        datos_tri.setdefault(str(proy_g), {})[gr] = round(v, 2)
+                        # Detectar columnas comunes entre grupos (mismo nombre)
+                        cols_comunes_tri = set(cols_lk_por_grupo.get(list(dfs_ok.keys())[0], []))
+                        for gr_tri in list(dfs_ok.keys())[1:]:
+                            cols_comunes_tri &= set(cols_lk_por_grupo.get(gr_tri, []))
 
-                            for proy_g, vals_t in datos_tri.items():
-                                if len(vals_t) >= 2:
-                                    rng_t = max(vals_t.values()) - min(vals_t.values())
-                                    filas_tri.append({
-                                        "Proyecto": proy_g, "Indicador": cl,
-                                        "Comunidad": vals_t.get("Comunidad", "Sin dato"),
-                                        "Aliados":   vals_t.get("Aliados",   "Sin dato"),
-                                        "Empresa":   vals_t.get("Empresa",   "Sin dato"),
-                                        "Rango MAX-MIN": round(rng_t, 2),
-                                        "Resultado": convergencia(rng_t, esc_max)})
+                        # Detectar si hay columnas distintas entre grupos
+                        todas_cols_lk = set(c for v in cols_lk_por_grupo.values() for c in v)
+                        hay_cols_distintas = len(todas_cols_lk) > len(cols_comunes_tri)
 
-                        if filas_tri:
-                            df_tri_enc = pd.DataFrame(filas_tri)
-                            st.dataframe(df_tri_enc, use_container_width=True)
-                            n_div = df_tri_enc["Resultado"].str.contains("Divergencia").sum()
-                            if n_div > 0:
-                                st.warning(f"⚠️ {n_div} divergencias detectadas.")
+                        # Mapeador de equivalencias (solo si hay columnas distintas)
+                        mapa_tri = {}  # {"Criterio A": {"Comunidad": "col1", "Aliados": "col2"}}
+
+                        if hay_cols_distintas and todas_cols_lk:
+                            with st.expander(
+                                    "⚙️ Mapeador de equivalencias para triangulación "
+                                    "(los grupos tienen preguntas distintas)", expanded=True):
+                                st.caption(
+                                    "Cada fila es un criterio de triangulación. "
+                                    "Selecciona qué pregunta de cada grupo corresponde "
+                                    "al mismo concepto. Deja '(no aplica)' si un grupo "
+                                    "no tiene esa pregunta.")
+                                n_criterios = st.number_input(
+                                    "¿Cuántos criterios quieres triangular?",
+                                    min_value=1, max_value=10, value=min(3, len(todas_cols_lk)),
+                                    step=1)
+                                for idx_crit in range(int(n_criterios)):
+                                    st.markdown(f"**Criterio {idx_crit + 1}**")
+                                    nombre_crit = st.text_input(
+                                        "Nombre del criterio (ej: Pertinencia territorial):",
+                                        key=f"crit_nombre_{idx_crit}",
+                                        placeholder="Ej: Pertinencia territorial")
+                                    if not nombre_crit:
+                                        nombre_crit = f"Criterio {idx_crit + 1}"
+                                    cols_crit_tri = st.columns(len(dfs_ok))
+                                    mapa_tri[nombre_crit] = {}
+                                    for i_gr, (gr_m, df_gm) in enumerate(dfs_ok.items()):
+                                        opciones_m = (["(no aplica)"] +
+                                                      cols_lk_por_grupo.get(gr_m, []))
+                                        with cols_crit_tri[i_gr]:
+                                            sel_m = st.selectbox(
+                                                f"{gr_m}:", opciones_m,
+                                                key=f"crit_{idx_crit}_{gr_m}")
+                                            if sel_m != "(no aplica)":
+                                                mapa_tri[nombre_crit][gr_m] = sel_m
+                        elif cols_comunes_tri:
+                            # Todas las columnas comunes se triangulan automáticamente
+                            st.caption(
+                                f"✅ {len(cols_comunes_tri)} pregunta(s) con el mismo nombre "
+                                f"en todos los grupos — triangulación automática. "
+                                f"Convergencia = diferencia MAX-MIN ≤ {umbral_t}")
+                            for cl_c in sorted(cols_comunes_tri):
+                                mapa_tri[cl_c] = {gr: cl_c for gr in dfs_ok}
+
+                        # Ejecutar triangulación con el mapa
+                        if not mapa_tri:
+                            st.info(
+                                "Configura el mapeador de equivalencias arriba "
+                                "para ejecutar la triangulación.")
                         else:
-                            st.info("Se necesitan al menos 2 grupos con datos en los mismos indicadores.")
+                            st.caption(f"Convergencia = diferencia MAX-MIN ≤ {umbral_t}")
+                            for criterio, col_por_gr in mapa_tri.items():
+                                if len(col_por_gr) < 2:
+                                    continue  # necesita al menos 2 grupos
+                                datos_tri = {}
+                                for gr_t, cl_t in col_por_gr.items():
+                                    df_gt = dfs_ok.get(gr_t)
+                                    if df_gt is None or cl_t not in df_gt.columns:
+                                        continue
+                                    if not (col_proy and col_proy in df_gt.columns):
+                                        continue
+                                    df_tmp_t = df_gt.copy()
+                                    df_tmp_t[cl_t] = df_tmp_t[cl_t].apply(
+                                        lambda x: texto_a_likert(x, esc_max))
+                                    for proy_g, v in df_tmp_t.groupby(col_proy)[cl_t].mean().items():
+                                        if pd.notna(v):
+                                            datos_tri.setdefault(str(proy_g), {})[gr_t] = round(v, 2)
+
+                                for proy_g, vals_t in datos_tri.items():
+                                    if len(vals_t) >= 2:
+                                        rng_t = max(vals_t.values()) - min(vals_t.values())
+                                        fila_tri = {
+                                            "Proyecto": proy_g,
+                                            "Criterio": criterio,
+                                            "Rango MAX-MIN": round(rng_t, 2),
+                                            "Resultado": convergencia(rng_t, esc_max)}
+                                        for gr_t in dfs_ok:
+                                            fila_tri[gr_t] = vals_t.get(gr_t, "Sin dato")
+                                        filas_tri.append(fila_tri)
+
+                            if filas_tri:
+                                df_tri_enc = pd.DataFrame(filas_tri)
+                                # Reordenar columnas: Proyecto, Criterio, grupos..., Rango, Resultado
+                                cols_ord = (["Proyecto", "Criterio"] +
+                                            [g for g in dfs_ok if g in df_tri_enc.columns] +
+                                            ["Rango MAX-MIN", "Resultado"])
+                                cols_ord = [c for c in cols_ord if c in df_tri_enc.columns]
+                                st.dataframe(df_tri_enc[cols_ord], use_container_width=True)
+                                n_div = df_tri_enc["Resultado"].str.contains("Divergencia").sum()
+                                n_conv = df_tri_enc["Resultado"].str.contains("Convergencia").sum()
+                                col_res1, col_res2 = st.columns(2)
+                                with col_res1:
+                                    st.metric("✅ Convergencias", n_conv)
+                                with col_res2:
+                                    st.metric("⚠️ Divergencias", n_div)
+                            else:
+                                st.info(
+                                    "No hay datos suficientes para triangular. "
+                                    "Verifica que la columna de proyecto esté configurada "
+                                    "y que los grupos tengan datos en común.")
 
                     # ── Fase 3: Cualitativo — clasificación en un solo paso ──
                     if cols_txt:
