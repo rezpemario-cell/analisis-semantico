@@ -2751,7 +2751,7 @@ elif modo == "🗺️ Cartografía Social":
                 with col_mun2:
                     # Distribución de frases por municipio y componente
                     dist_mun = df_fil.groupby(["municipio", "componente"]).size().reset_index(name="Frases")
-                    fig_mun_dist = px.bar(dist_mun, x="Componente", y="Frases",
+                    fig_mun_dist = px.bar(dist_mun.rename(columns={"Frases":"Número de frases"}), x="Componente", y="Número de frases",
                                          color="Municipio", barmode="group",
                                          title="Participación por municipio",
                                          color_discrete_sequence=px.colors.qualitative.Set1)
