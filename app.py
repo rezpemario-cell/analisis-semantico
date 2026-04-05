@@ -463,6 +463,8 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
         ("Umbral Amarillo (≥)",    "=B8*0.67",                 False),
         ("Umbral Rojo (<)",        "=B10",                     False),
         (None, None, False),
+        ("Nota", "Los umbrales se calculan automáticamente según la escala máxima", False),
+        (None, None, False),
         ("PROYECTOS ANALIZADOS", None, True),
     ]
 
@@ -589,10 +591,23 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
                 rojo_formula   = (f"AND(ISNUMBER({cl_cf}2),"
                                   f"{cl_cf}2<CONFIG!$B${ROW_AMARI})"))
 
-        nota_lk = n_proy + 3
+        # Fila de promedio general (fórmula AVERAGE de todos los proyectos)
+        prom_row = n_proy + 2
+        ws_lk.cell(prom_row, 1).value = "PROMEDIO GENERAL"
+        ws_lk.cell(prom_row, 1).font = Font(bold=True, name="Calibri")
+        for ci_prom in range(2, len(hdrs_lk) + 1):
+            cl_prom = get_column_letter(ci_prom)
+            ws_lk.cell(prom_row, ci_prom).value = (
+                f"=IFERROR(AVERAGE({cl_prom}2:{cl_prom}{n_proy+1}),\"\")")
+            ws_lk.cell(prom_row, ci_prom).number_format = "0.00"
+            ws_lk.cell(prom_row, ci_prom).font = Font(bold=True, name="Calibri")
+        nota_lk = n_proy + 4
         ws_lk.cell(nota_lk, 1).value = (
-            "🟢 Destacado (≥ 90% escala)  |  🟡 Aceptable (67-89%)  |  "
-            "🔴 Crítico (< 67%)  |  Umbrales se leen automáticamente desde CONFIG")
+            f"Escala: 1 a {escala_max}  |  "
+            f"🟢 Destacado ≥{round(escala_max*0.9,2)}  |  "
+            f"🟡 Aceptable {round(escala_max*0.67,2)}–{round(escala_max*0.9-0.01,2)}  |  "
+            f"🔴 Crítico <{round(escala_max*0.67,2)}  |  "
+            "Umbrales automáticos desde CONFIG")
         ws_lk.cell(nota_lk, 1).font = Font(italic=True, color="777777", name="Calibri")
         ws_lk.freeze_panes = "B2"
 
@@ -928,9 +943,12 @@ def crear_excel_encuesta_formulas(dfs_ok, cfg, resultados):
         ("Empresa cliente:", "=CONFIG!B3"),
         ("Municipios:", "=CONFIG!B4"),
         ("Período:", "=CONFIG!B5"),
-        ("Escala Likert (máximo):", "=CONFIG!B8"),
-        ("Umbral Verde (≥):", f"=CONFIG!B{ROW_VERDE}"),
-        ("Umbral Amarillo (≥):", f"=CONFIG!B{ROW_AMARI}"),
+        ("Grupos analizados:", ", ".join(dfs_ok.keys())),
+        ("Escala Likert (máximo):", escala_max),
+        ("Umbral Verde (≥):", round(escala_max * 0.9, 2)),
+        ("Umbral Rojo (<):", round(escala_max * 0.67, 2)),
+        ("Proyectos analizados:", len(proyectos)),
+        ("Indicadores Likert:", len(cols_likert)),
     ]
     for ri_d, (lbl, val) in enumerate(meta_fields, 3):
         ws_dash.cell(ri_d, 1).value = lbl
@@ -2402,17 +2420,20 @@ if modo == "📋 Encuesta":
                                         pd.DataFrame(filas_iac_vista),
                                         "ÍNDICE DE ACUERDO PONDERADO vs PROMEDIO SIMPLE")
 
-                        # Riesgo social
-                        if filas_riesgo:
-                            _hoja_extra(wb_enc, "Riesgo_social",
-                                        pd.DataFrame(filas_riesgo),
-                                        f"SEMÁFORO DE RIESGO SOCIAL — Nivel global: {nivel_riesgo}")
+                        # Riesgo social — siempre crear la hoja
+                        _nivel_riesgo = nivel_riesgo if "nivel_riesgo" in vars() else "🟢 Bajo"
+                        _df_riesgo = pd.DataFrame(filas_riesgo) if filas_riesgo else pd.DataFrame([{
+                            "Proyecto": "(análisis global)",
+                            "Divergencias": n_div_riesgo if "n_div_riesgo" in vars() else 0,
+                            "Nivel": _nivel_riesgo}])
+                        _hoja_extra(wb_enc, "Riesgo_social", _df_riesgo,
+                                    f"SEMÁFORO DE RIESGO SOCIAL — Nivel global: {_nivel_riesgo}")
 
-                        # Alertas
-                        if filas_alertas:
-                            df_alertas = pd.DataFrame({"Alerta": filas_alertas})
-                            _hoja_extra(wb_enc, "Alertas",
-                                        df_alertas, "ALERTAS AUTOMÁTICAS")
+                        # Alertas — siempre crear la hoja
+                        _alertas_content = filas_alertas if filas_alertas else ["✅ No se detectaron alertas en este análisis."]
+                        _hoja_extra(wb_enc, "Alertas",
+                                    pd.DataFrame({"Alerta": _alertas_content}),
+                                    "ALERTAS AUTOMÁTICAS")
 
                         # Análisis por rol
                         if filas_rol:
