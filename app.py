@@ -1467,88 +1467,89 @@ if modo == "📋 Encuesta":
     st.markdown("Análisis de encuestas de inversión social — tres grupos: "
                 "**Comunidad**, **Aliados** y **Empresa**.")
 
+    # ── Funciones locales del módulo ──────────────────────────────
     def semaforo_likert(valor, escala_max):
-        if pd.isna(valor):
-            return "⬜ Sin dato"
-        if valor >= escala_max * 0.9:
-            return f"🟢 {valor:.2f}"
-        elif valor >= escala_max * 0.67:
-            return f"🟡 {valor:.2f}"
+        if pd.isna(valor): return "⬜ Sin dato"
+        if valor >= escala_max * 0.9: return f"🟢 {valor:.2f}"
+        elif valor >= escala_max * 0.67: return f"🟡 {valor:.2f}"
         return f"🔴 {valor:.2f}"
 
     def semaforo_rating(valor):
-        if pd.isna(valor):
-            return "⬜ Sin dato"
-        if valor >= 4.5:
-            return f"🟢 {valor:.2f}"
-        elif valor >= 3.5:
-            return f"🟡 {valor:.2f}"
+        if pd.isna(valor): return "⬜ Sin dato"
+        if valor >= 4.5: return f"🟢 {valor:.2f}"
+        elif valor >= 3.5: return f"🟡 {valor:.2f}"
         return f"🔴 {valor:.2f}"
 
     def convergencia(rango, escala_max):
         return "✅ Convergencia" if rango <= (0.5 if escala_max == 3 else 1.0) else "⚠️ Divergencia"
 
+    def indice_acuerdo_ponderado(series, escala_max):
+        """Promedio ponderado donde valores más extremos tienen mayor peso."""
+        vals = series.dropna()
+        if len(vals) == 0: return np.nan
+        pesos = vals.apply(lambda x: abs(x - (escala_max + 1) / 2) + 1)
+        return round(float((vals * pesos).sum() / pesos.sum()), 3)
+
+    def semaforo_riesgo(divergencia_max, n_divergencias_total):
+        """Semáforo de riesgo social basado en divergencias detectadas."""
+        if divergencia_max >= 1.5 or n_divergencias_total >= 5:
+            return "🔴 Alto"
+        elif divergencia_max >= 1.0 or n_divergencias_total >= 2:
+            return "🟡 Medio"
+        return "🟢 Bajo"
+
     # ── Configuración general ─────────────────────────────────────
     with st.expander("⚙️ Configuración del análisis", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            org_enc    = st.text_input("Organización ejecutora:", placeholder="Ej: CDC")
-            cli_enc    = st.text_input("Empresa cliente:", placeholder="Ej: Collective Mining")
-            mun_enc    = st.text_input("Municipios / territorios:", placeholder="Ej: Marmato y Supía")
-            per_enc    = st.text_input("Período de evaluación:", placeholder="Ej: Primer semestre 2026")
+            org_enc  = st.text_input("Organización ejecutora:", placeholder="Ej: CDC")
+            cli_enc  = st.text_input("Empresa cliente:", placeholder="Ej: Collective Mining")
+            mun_enc  = st.text_input("Municipios / territorios:", placeholder="Ej: Marmato y Supía")
+            per_enc  = st.text_input("Período de evaluación:", placeholder="Ej: Primer semestre 2026")
         with c2:
-            esc_enc    = st.radio("Escala Likert:", ["1 a 3","1 a 5"], horizontal=True)
-            esc_max    = 3 if esc_enc == "1 a 3" else 5
+            esc_enc  = st.radio("Escala Likert:", ["1 a 3", "1 a 5"], horizontal=True)
+            esc_max  = 3 if esc_enc == "1 a 3" else 5
             st.caption(f"🟢 ≥{esc_max*0.9:.1f} | 🟡 {esc_max*0.67:.1f}–{esc_max*0.9-0.01:.2f} | 🔴 <{esc_max*0.67:.1f}")
-            proy_txt   = st.text_area("Lista de proyectos (uno por línea):", height=115,
-                                      placeholder="Proyecto Acueducto\nProyecto Educación\n...")
+            proy_txt  = st.text_area("Lista de proyectos (uno por línea):", height=115,
+                                     placeholder="Proyecto Acueducto\nProyecto Educación\n...")
             proy_lista = [p.strip() for p in proy_txt.split("\n") if p.strip()]
 
     # ── Carga de archivos ─────────────────────────────────────────
     st.subheader("📂 Carga de archivos")
     st.info("Puedes subir uno, dos o los tres archivos. El análisis se adapta a lo disponible.")
     cf1, cf2, cf3 = st.columns(3)
-    with cf1:
-        arc_com = st.file_uploader("👥 Comunidad",  type=["xlsx"], key="f_com")
-    with cf2:
-        arc_ali = st.file_uploader("🤝 Aliados",    type=["xlsx"], key="f_ali")
-    with cf3:
-        arc_emp = st.file_uploader("🏢 Empresa",    type=["xlsx"], key="f_emp")
+    with cf1: arc_com = st.file_uploader("👥 Comunidad", type=["xlsx"], key="f_com")
+    with cf2: arc_ali = st.file_uploader("🤝 Aliados",   type=["xlsx"], key="f_ali")
+    with cf3: arc_emp = st.file_uploader("🏢 Empresa",   type=["xlsx"], key="f_emp")
 
-    arcs = {"Comunidad": arc_com, "Aliados": arc_ali, "Empresa": arc_emp}
+    arcs    = {"Comunidad": arc_com, "Aliados": arc_ali, "Empresa": arc_emp}
     arcs_act = {k: v for k, v in arcs.items() if v is not None}
 
     if arcs_act:
         dfs_ok = {}
         for gr, arc in arcs_act.items():
-            try:
-                dfs_ok[gr] = pd.read_excel(arc)
-            except Exception as e_r:
-                st.error(f"Error leyendo {gr}: {e_r}")
+            try: dfs_ok[gr] = pd.read_excel(arc)
+            except Exception as e_r: st.error(f"Error leyendo {gr}: {e_r}")
 
         if dfs_ok:
-            # Columnas del primer grupo (para col_proy y cols geo que suelen ser comunes)
             cols_ref = list(dfs_ok[list(dfs_ok.keys())[0]].columns)
 
             # ── Configuración de columnas ─────────────────────────
             st.subheader("🗂️ Configuración de columnas")
-
-            # Columna de proyecto (debe existir con el mismo nombre en todos los grupos)
             opc_proy = ["(sin columna de proyecto)"] + cols_ref
-            col_proy = st.selectbox("Columna que identifica el proyecto "
-                                    "(debe tener el mismo nombre en todos los archivos):",
-                                    opc_proy)
+            col_proy = st.selectbox(
+                "Columna que identifica el proyecto (misma en todos los archivos):", opc_proy)
             col_proy = None if col_proy.startswith("(sin") else col_proy
 
-            # ── Un expander por grupo con sus propias columnas ────
-            st.markdown("**Configura las columnas de cada grupo por separado** "
-                        "— cada archivo puede tener preguntas distintas.")
+            # Columna de rol (nueva)
+            col_rol = st.selectbox(
+                "Columna de rol / perfil del respondente (opcional — para análisis por rol):",
+                ["(ninguna)"] + cols_ref)
+            col_rol = None if col_rol == "(ninguna)" else col_rol
 
-            # Diccionarios: {grupo: [lista de columnas seleccionadas]}
-            cols_lk_por_grupo  = {}
-            cols_sn_por_grupo  = {}
-            cols_txt_por_grupo = {}
-            col_cal_por_grupo  = {}
+            st.markdown("**Configura las columnas de cada grupo por separado:**")
+            cols_lk_por_grupo, cols_sn_por_grupo = {}, {}
+            cols_txt_por_grupo, col_cal_por_grupo = {}, {}
 
             for gr_cfg, df_cfg in dfs_ok.items():
                 cols_gr = list(df_cfg.columns)
@@ -1556,35 +1557,26 @@ if modo == "📋 Encuesta":
                     cg1, cg2 = st.columns(2)
                     with cg1:
                         cols_lk_por_grupo[gr_cfg] = st.multiselect(
-                            f"Likert (numéricas) — {gr_cfg}:",
-                            cols_gr, key=f"lk_{gr_cfg}")
-                        cal_sel = st.selectbox(
-                            f"Calificación 1-5 — {gr_cfg}:",
-                            ["(ninguna)"] + cols_gr, key=f"cal_{gr_cfg}")
-                        col_cal_por_grupo[gr_cfg] = (
-                            None if cal_sel == "(ninguna)" else cal_sel)
+                            f"Likert — {gr_cfg}:", cols_gr, key=f"lk_{gr_cfg}")
+                        cal_sel = st.selectbox(f"Calificación 1-5 — {gr_cfg}:",
+                                               ["(ninguna)"] + cols_gr, key=f"cal_{gr_cfg}")
+                        col_cal_por_grupo[gr_cfg] = None if cal_sel == "(ninguna)" else cal_sel
                     with cg2:
                         cols_sn_por_grupo[gr_cfg] = st.multiselect(
-                            f"Sí / No — {gr_cfg}:",
-                            cols_gr, key=f"sn_{gr_cfg}")
+                            f"Sí / No — {gr_cfg}:", cols_gr, key=f"sn_{gr_cfg}")
                         cols_txt_por_grupo[gr_cfg] = st.multiselect(
-                            f"Texto abierto — {gr_cfg}:",
-                            cols_gr, key=f"txt_{gr_cfg}")
+                            f"Texto abierto — {gr_cfg}:", cols_gr, key=f"txt_{gr_cfg}")
 
-            # Para compatibilidad con el resto del código (triangulación usa listas globales)
             cols_lk  = sorted(set(c for v in cols_lk_por_grupo.values() for c in v))
             cols_sn  = sorted(set(c for v in cols_sn_por_grupo.values() for c in v))
             cols_txt = sorted(set(c for v in cols_txt_por_grupo.values() for c in v))
             col_cal  = next((v for v in col_cal_por_grupo.values() if v), None)
 
-            # Columnas geo (comunes — usar las del primer grupo)
             cm3, cm4 = st.columns(2)
             with cm3:
-                col_muni = st.selectbox("Columna municipio (opcional):",
-                                        ["(ninguna)"] + cols_ref)
+                col_muni = st.selectbox("Columna municipio (opcional):", ["(ninguna)"] + cols_ref)
                 col_muni = None if col_muni == "(ninguna)" else col_muni
-                col_ver  = st.selectbox("Columna vereda (opcional):",
-                                        ["(ninguna)"] + cols_ref)
+                col_ver  = st.selectbox("Columna vereda (opcional):", ["(ninguna)"] + cols_ref)
                 col_ver  = None if col_ver == "(ninguna)" else col_ver
             with cm4:
                 col_part = st.selectbox(
@@ -1592,11 +1584,13 @@ if modo == "📋 Encuesta":
                     ["(ninguna)"] + cols_ref)
                 col_part = None if col_part == "(ninguna)" else col_part
 
-            # ── Fase 1: Validación ────────────────────────────────
-            st.subheader("📋 Fase 1 — Validación de datos")
+            # ── Fase 1: Validación + Checklist ───────────────────
+            st.subheader("📋 Fase 1 — Validación y checklist de calidad")
             if st.button("🔍 Validar datos"):
                 st.session_state["enc_fase1_ok"] = False
                 resumen_val = []
+                checklist = []
+
                 for gr_v, df_v in dfs_ok.items():
                     alertas_v = []
                     for cl_v in cols_lk_por_grupo.get(gr_v, cols_lk):
@@ -1605,49 +1599,75 @@ if modo == "📋 Encuesta":
                             no_num_v  = col_num_v.isna().sum() - df_v[cl_v].isna().sum()
                             if no_num_v > 0:
                                 alertas_v.append(f"'{cl_v}': {no_num_v} no numéricos")
-                            fuera_v = ((col_num_v < 1)|(col_num_v > esc_max)).sum()
+                            fuera_v = ((col_num_v < 1) | (col_num_v > esc_max)).sum()
                             if fuera_v > 0:
                                 alertas_v.append(f"'{cl_v}': {fuera_v} fuera de 1-{esc_max}")
                     pdet = {}
                     if col_proy and col_proy in df_v.columns:
                         pdet = df_v[col_proy].value_counts().to_dict()
                         if gr_v == "Aliados":
-                            posibles_id = [c for c in df_v.columns
-                                           if any(x in c.lower()
-                                                  for x in ["nombre","respondente","id","persona"])]
+                            posibles_id = [c for c in df_v.columns if any(
+                                x in c.lower() for x in ["nombre","respondente","id","persona"])]
                             if posibles_id:
                                 n_pers = df_v[posibles_id[0]].nunique()
                                 st.info(f"ℹ️ **Aliados:** {n_pers} personas únicas, "
-                                        f"{len(df_v)} evaluaciones (col: '{posibles_id[0]}')")
+                                        f"{len(df_v)} evaluaciones")
                         if proy_lista and pdet:
-                            det_s_lower = set(normalizar_str(k) for k in pdet)
-                            esp_s_lower = set(normalizar_str(p) for p in proy_lista)
+                            det_s = set(normalizar_str(k) for k in pdet)
+                            esp_s = set(normalizar_str(p) for p in proy_lista)
                             det_orig = {normalizar_str(k): str(k).strip() for k in pdet}
                             esp_orig = {normalizar_str(p): p.strip() for p in proy_lista}
-                            solo_datos = det_s_lower - esp_s_lower
-                            solo_lista = esp_s_lower - det_s_lower
+                            solo_datos = det_s - esp_s
+                            solo_lista = esp_s - det_s
                             if solo_datos:
-                                st.warning(f"**{gr_v}** — En datos pero NO en tu lista. "
-                                           f"Copia exactamente: {', '.join(det_orig[k] for k in solo_datos)}")
+                                st.warning(f"**{gr_v}** — En datos pero NO en lista: "
+                                           f"{', '.join(det_orig[k] for k in solo_datos)}")
                             if solo_lista:
-                                st.warning(f"**{gr_v}** — En tu lista pero SIN datos. "
-                                           f"Revisa mayúsculas/tildes: {', '.join(esp_orig[k] for k in solo_lista)}")
+                                st.warning(f"**{gr_v}** — En lista pero SIN datos: "
+                                           f"{', '.join(esp_orig[k] for k in solo_lista)}")
                         if pdet:
                             st.write(f"**{gr_v} — Proyectos detectados:**")
                             st.dataframe(pd.DataFrame(list(pdet.items()),
                                          columns=["Proyecto", f"Filas ({gr_v})"]),
                                          use_container_width=True)
                     resumen_val.append({
-                        "Grupo": gr_v,
-                        "Filas": len(df_v),
+                        "Grupo": gr_v, "Filas": len(df_v),
                         "Proyectos": len(pdet) if pdet else "N/A",
-                        "Alertas": "; ".join(alertas_v) if alertas_v else "✅ Sin alertas"
-                    })
-                st.dataframe(pd.DataFrame(resumen_val), use_container_width=True)
-                st.session_state["enc_fase1_ok"] = True
-                st.success("✅ Validación completada. Presiona **▶ Analizar encuestas** para continuar.")
+                        "Alertas": "; ".join(alertas_v) if alertas_v else "✅ Sin alertas"})
 
-            # ── Fases 2-3-4: Análisis ─────────────────────────────
+                st.dataframe(pd.DataFrame(resumen_val), use_container_width=True)
+
+                # Checklist de calidad (basado en Prompt Maestro Sección 9)
+                st.write("**✅ Checklist de calidad:**")
+                checklist = [
+                    ("Al menos un archivo cargado", len(dfs_ok) >= 1),
+                    ("Columna de proyecto configurada", col_proy is not None),
+                    ("Al menos una columna Likert seleccionada", len(cols_lk) > 0),
+                    ("Escala Likert declarada", esc_max in [3, 5]),
+                    ("Lista de proyectos ingresada", len(proy_lista) > 0),
+                    ("Columna de texto abierto seleccionada", len(cols_txt) > 0),
+                    ("Sin alertas de valores fuera de rango",
+                     all("fuera de" not in r.get("Alertas","") for r in resumen_val)),
+                    ("Municipio configurado para participación territorial",
+                     col_muni is not None),
+                ]
+                col_ck1, col_ck2 = st.columns(2)
+                for i, (item, ok) in enumerate(checklist):
+                    col = col_ck1 if i % 2 == 0 else col_ck2
+                    with col:
+                        st.write(f"{'✅' if ok else '⚠️'} {item}")
+
+                n_ok = sum(1 for _, ok in checklist if ok)
+                if n_ok == len(checklist):
+                    st.success(f"✅ Checklist completo ({n_ok}/{len(checklist)}) — listo para analizar.")
+                else:
+                    st.warning(f"⚠️ {n_ok}/{len(checklist)} items completados. "
+                               f"Puedes continuar pero el análisis puede ser parcial.")
+
+                st.session_state["enc_fase1_ok"] = True
+                st.session_state["enc_checklist"] = checklist
+
+            # ── Fases 2-3-4 ──────────────────────────────────────
             if st.session_state.get("enc_fase1_ok"):
                 contexto_enc = st.selectbox("Contexto del análisis:",
                     ["evaluación de inversión social y desarrollo comunitario",
@@ -1655,20 +1675,28 @@ if modo == "📋 Encuesta":
                      "diagnóstico territorial participativo"])
 
                 if st.button("▶ Analizar encuestas"):
-                    # Determinar proyectos desde los datos reales (sin comparar strings)
+                    # Determinar proyectos (desde datos reales)
                     todos_proy = set()
                     for gr_p, df_p in dfs_ok.items():
                         if col_proy and col_proy in df_p.columns:
-                            todos_proy.update(df_p[col_proy].dropna().astype(str).str.strip().unique())
+                            todos_proy.update(
+                                df_p[col_proy].dropna().astype(str).str.strip().unique())
                     if not todos_proy and proy_lista:
                         todos_proy = set(proy_lista)
                     proyectos_a = sorted(todos_proy) if todos_proy else ["(análisis global)"]
+                    grupos_disponibles = list(dfs_ok.keys())
 
                     filas_consolidado, filas_acuerdo = [], []
                     filas_sino, filas_cal, filas_tri = [], [], []
                     filas_cual, sin_clasificar_enc   = [], []
+                    # Estructuras para nuevas features
+                    tabla_consolidada_todos  = {}  # {proyecto: {col_grupo: valor}}
+                    filas_iac                = []  # índice acuerdo ponderado
+                    filas_riesgo             = []
+                    filas_rol                = []
+                    filas_alertas            = []
 
-                    # ── Participación territorial (si el usuario configuró cols geo) ─
+                    # ── Participación territorial ─────────────────
                     _col_muni = col_muni if "col_muni" in vars() else None
                     _col_ver  = col_ver  if "col_ver"  in vars() else None
                     _col_part = col_part if "col_part" in vars() else None
@@ -1680,42 +1708,41 @@ if modo == "📋 Encuesta":
                             df_tmp = df_geo_g.copy()
                             df_tmp["_grupo"] = gr_geo
                             if _col_part and _col_part in df_tmp.columns:
-                                df_tmp["_part"] = pd.to_numeric(df_tmp[_col_part], errors="coerce").fillna(1)
+                                df_tmp["_part"] = pd.to_numeric(
+                                    df_tmp[_col_part], errors="coerce").fillna(1)
                             else:
                                 df_tmp["_part"] = 1
                             df_geo_list.append(df_tmp)
                         df_geo = pd.concat(df_geo_list, ignore_index=True)
 
                         if _col_muni and _col_muni in df_geo.columns:
-                            pm_enc = (df_geo.groupby(_col_muni)["_part"]
-                                      .sum().reset_index()
-                                      .sort_values("_part", ascending=False))
+                            pm_enc = (df_geo.groupby(_col_muni)["_part"].sum()
+                                      .reset_index().sort_values("_part", ascending=False))
                             pm_enc.columns = ["Municipio", "Participantes"]
                             col_pm1, col_pm2 = st.columns(2)
                             with col_pm1:
-                                st.plotly_chart(
-                                    px.bar(pm_enc, x="Municipio", y="Participantes",
-                                           color="Municipio", text="Participantes",
-                                           title="Participantes por municipio"),
+                                st.plotly_chart(px.bar(pm_enc, x="Municipio",
+                                    y="Participantes", color="Municipio",
+                                    text="Participantes",
+                                    title="Participantes por municipio"),
                                     use_container_width=True)
                             with col_pm2:
                                 st.dataframe(pm_enc, use_container_width=True)
 
                         if _col_ver and _col_ver in df_geo.columns:
                             group_cols = ([_col_muni, _col_ver]
-                                          if _col_muni and _col_muni in df_geo.columns
-                                          else [_col_ver])
-                            pv_enc = (df_geo.groupby(group_cols)["_part"]
-                                      .sum().reset_index())
+                                         if _col_muni and _col_muni in df_geo.columns
+                                         else [_col_ver])
+                            pv_enc = df_geo.groupby(group_cols)["_part"].sum().reset_index()
                             if len(group_cols) == 2:
-                                pv_enc.columns = ["Municipio", "Vereda", "Participantes"]
-                                pv_enc = pv_enc.sort_values(["Municipio","Participantes"],
-                                                             ascending=[True, False])
+                                pv_enc.columns = ["Municipio","Vereda","Participantes"]
+                                pv_enc = pv_enc.sort_values(
+                                    ["Municipio","Participantes"], ascending=[True,False])
                                 fig_pv = px.bar(pv_enc, x="Vereda", y="Participantes",
                                                 color="Municipio", text="Participantes",
                                                 title="Participantes por vereda")
                             else:
-                                pv_enc.columns = ["Vereda", "Participantes"]
+                                pv_enc.columns = ["Vereda","Participantes"]
                                 pv_enc = pv_enc.sort_values("Participantes", ascending=False)
                                 fig_pv = px.bar(pv_enc, x="Vereda", y="Participantes",
                                                 text="Participantes",
@@ -1723,124 +1750,183 @@ if modo == "📋 Encuesta":
                             st.plotly_chart(fig_pv, use_container_width=True)
                             st.dataframe(pv_enc, use_container_width=True)
 
-                        pg_enc = (df_geo.groupby("_grupo")["_part"]
-                                  .sum().reset_index())
-                        pg_enc.columns = ["Grupo", "Participantes"]
+                        pg_enc = df_geo.groupby("_grupo")["_part"].sum().reset_index()
+                        pg_enc.columns = ["Grupo","Participantes"]
                         total_enc = int(pg_enc["Participantes"].sum())
-                        pg_enc["% del total"] = (pg_enc["Participantes"]/total_enc*100).round(1).astype(str)+"%"
+                        pg_enc["% del total"] = (
+                            pg_enc["Participantes"]/total_enc*100).round(1).astype(str)+"%"
                         st.metric("👥 Total participantes (todos los grupos)", total_enc)
                         st.dataframe(pg_enc, use_container_width=True)
 
-                    # ── Fase 2: Likert — usando groupby (sin comparación de strings) ─
+                    # ── Fase 2: Likert ────────────────────────────
                     if cols_lk:
-                        st.subheader("📊 Fase 2 — Análisis Likert por proyecto")
-                        st.caption("🟢 Destacado | 🟡 Aceptable | 🔴 Crítico | ⚠️indiv. = n≤2")
+                        st.subheader("📊 Fase 2 — Análisis Likert")
 
+                        # ── VISTA CONSOLIDADA: todos los proyectos × grupos en 1 tabla ──
+                        st.markdown("#### 📋 Vista consolidada — todos los proyectos y grupos")
+                        st.caption("🟢 Destacado | 🟡 Aceptable | 🔴 Crítico | "
+                                   "⬜ Sin dato | ⚠️indiv. n≤2")
+
+                        # Construir tabla pivot: filas=proyectos, columnas=criterio|grupo
+                        datos_pivot = {}  # {(proy,criterio,gr): promedio}
                         for gr, df_g in dfs_ok.items():
-                            # Convertir todas las columnas Likert a numérico de una sola vez
                             df_lk = df_g.copy()
-                            for cl in cols_lk:
-                                if cl in df_lk.columns:
-                                    df_lk[cl] = df_lk[cl].apply(
-                                        lambda x: texto_a_likert(x, esc_max))
-
+                            cols_lk_disp_g = [c for c in cols_lk_por_grupo.get(gr, cols_lk)
+                                              if c in df_lk.columns]
+                            for cl in cols_lk_disp_g:
+                                df_lk[cl] = df_lk[cl].apply(
+                                    lambda x: texto_a_likert(x, esc_max))
                             if col_proy and col_proy in df_lk.columns:
-                                # Usar columnas Likert específicas de este grupo
-                                cols_lk_disp = [c for c in cols_lk_por_grupo.get(gr, cols_lk)
-                                                if c in df_lk.columns]
-                                grp = df_lk.groupby(col_proy)[cols_lk_disp]
-                                promedios = grp.mean()
-                                conteos   = grp.count()
+                                for proy_g in proyectos_a:
+                                    mask = df_lk[col_proy].astype(str).str.strip() == str(proy_g).strip()
+                                    for cl in cols_lk_disp_g:
+                                        vals = df_lk.loc[mask, cl].dropna()
+                                        n_v  = len(vals)
+                                        if n_v > 0:
+                                            prom = vals.mean()
+                                            iac  = indice_acuerdo_ponderado(vals, esc_max)
+                                            av   = "⚠️" if n_v <= 2 else ""
+                                            datos_pivot[(str(proy_g), cl, gr)] = {
+                                                "prom": prom, "n": n_v, "av": av, "iac": iac}
+                                        else:
+                                            datos_pivot[(str(proy_g), cl, gr)] = None
 
-                                st.write(f"**{gr}** — Promedios Likert por proyecto:")
-                                # Tabla con semáforos
-                                df_sem = promedios.copy()
-                                for col_s in df_sem.columns:
-                                    df_sem[col_s] = df_sem[col_s].apply(
-                                        lambda v: semaforo_likert(v, esc_max)
-                                        if pd.notna(v) else "⬜")
-                                st.dataframe(df_sem, use_container_width=True)
+                        # Tabla de semáforos consolidada
+                        filas_pivot = []
+                        for proy_g in proyectos_a:
+                            fila_p = {"Proyecto": str(proy_g)[:40]}
+                            for cl in cols_lk:
+                                for gr in grupos_disponibles:
+                                    key = (str(proy_g), cl, gr)
+                                    dato = datos_pivot.get(key)
+                                    col_lbl = f"{cl[:35]} | {gr}"
+                                    if dato:
+                                        fila_p[col_lbl] = (
+                                            f"{semaforo_likert(dato['prom'], esc_max)}"
+                                            f"{dato['av']} (n={dato['n']})")
+                                    else:
+                                        fila_p[col_lbl] = "⬜ Sin dato"
+                                    # Acumular para export
+                                    filas_consolidado.append({
+                                        "Proyecto": proy_g, "Indicador": cl, "Grupo": gr,
+                                        "Promedio": round(dato["prom"],2) if dato else None,
+                                        "n": dato["n"] if dato else 0,
+                                        "Semáforo": semaforo_likert(dato["prom"], esc_max) if dato else "⬜",
+                                        "IAP": dato["iac"] if dato else None})
+                            filas_pivot.append(fila_p)
 
-                                # Tabla numérica limpia
-                                st.write("Vista numérica:")
-                                st.dataframe(promedios.round(2), use_container_width=True)
+                        st.dataframe(pd.DataFrame(filas_pivot).set_index("Proyecto"),
+                                     use_container_width=True)
 
-                                # % de acuerdo (valor máximo)
-                                st.write("% de acuerdo (% que respondió el valor máximo):")
-                                df_ac = df_lk.groupby(col_proy)[cols_lk_disp].apply(
-                                    lambda g: (g == esc_max).mean() * 100).round(1)
-                                st.dataframe(df_ac.applymap(lambda v: f"{v:.0f}%"
-                                    if pd.notna(v) else "—"), use_container_width=True)
+                        # ── GRÁFICA DE BARRAS POR CRITERIO ───────────────
+                        st.markdown("#### 📊 Promedios por criterio — todos los proyectos")
+                        for cl in cols_lk:
+                            filas_bar = []
+                            for gr in grupos_disponibles:
+                                for proy_g in proyectos_a:
+                                    dato = datos_pivot.get((str(proy_g), cl, gr))
+                                    if dato:
+                                        filas_bar.append({
+                                            "Proyecto": str(proy_g)[:40],
+                                            "Grupo": gr,
+                                            "Promedio": round(dato["prom"],2)})
+                            if filas_bar:
+                                df_bar = pd.DataFrame(filas_bar)
+                                fig_bar = px.bar(
+                                    df_bar, x="Proyecto", y="Promedio",
+                                    color="Grupo", barmode="group",
+                                    title=cl[:90],
+                                    text="Promedio",
+                                    color_discrete_sequence=px.colors.qualitative.Set2)
+                                fig_bar.update_traces(texttemplate="%{text:.2f}",
+                                                      textposition="outside")
+                                fig_bar.update_layout(height=380, yaxis_range=[0, esc_max * 1.15])
+                                fig_bar.add_hline(y=esc_max * 0.9, line_dash="dot",
+                                                  line_color="green",
+                                                  annotation_text="🟢 Umbral")
+                                fig_bar.add_hline(y=esc_max * 0.67, line_dash="dot",
+                                                  line_color="orange",
+                                                  annotation_text="🟡 Umbral")
+                                st.plotly_chart(fig_bar, use_container_width=True)
 
-                                # Distribución porcentual completa por valor
-                                with st.expander(f"📊 Distribución % por valor de escala — {gr}"):
-                                    st.caption(
-                                        f"Muestra qué % de participantes eligió cada valor "
-                                        f"(1 a {esc_max}) por pregunta y proyecto. "
-                                        f"Útil para detectar consenso (todos eligen el mismo) "
-                                        f"o polarización (respuestas dispersas).")
-                                    for cl in cols_lk_disp:
-                                        st.write(f"**{cl[:80]}**")
+                        # ── ÍNDICE DE ACUERDO PONDERADO ──────────────────
+                        st.markdown("#### ⚖️ Índice de acuerdo ponderado vs promedio simple")
+                        st.caption("El IAP pondera más las respuestas extremas. "
+                                   "Si IAP > promedio → hay voces muy fuertes en los extremos. "
+                                   "Si IAP ≈ promedio → respuestas homogéneas.")
+                        filas_iac_vista = []
+                        for proy_g in proyectos_a:
+                            for cl in cols_lk:
+                                for gr in grupos_disponibles:
+                                    dato = datos_pivot.get((str(proy_g), cl, gr))
+                                    if dato and dato["n"] > 0:
+                                        filas_iac_vista.append({
+                                            "Proyecto": str(proy_g)[:35],
+                                            "Indicador": cl[:45],
+                                            "Grupo": gr,
+                                            "Promedio simple": round(dato["prom"],2),
+                                            "IAP": dato["iac"],
+                                            "Diferencia": round(dato["iac"]-dato["prom"],3)})
+                        if filas_iac_vista:
+                            df_iac = pd.DataFrame(filas_iac_vista)
+                            filas_iac = filas_iac_vista
+                            with st.expander("Ver tabla IAP completa"):
+                                st.dataframe(df_iac, use_container_width=True)
+
+                        # ── DISTRIBUCIÓN % POR VALOR ──────────────────────
+                        with st.expander("📊 Distribución % por valor de escala"):
+                            st.caption(f"Qué % de participantes eligió cada valor (1 a {esc_max})")
+                            for gr, df_g in dfs_ok.items():
+                                df_lk2 = df_g.copy()
+                                cols_lk_disp_g2 = [c for c in cols_lk_por_grupo.get(gr, cols_lk)
+                                                   if c in df_lk2.columns]
+                                for cl in cols_lk_disp_g2:
+                                    df_lk2[cl] = df_lk2[cl].apply(
+                                        lambda x: texto_a_likert(x, esc_max))
+                                if col_proy and col_proy in df_lk2.columns and cols_lk_disp_g2:
+                                    st.write(f"**{gr}**")
+                                    for cl in cols_lk_disp_g2:
+                                        st.write(f"*{cl[:80]}*")
                                         filas_dist = []
-                                        for proy_d in promedios.index:
-                                            mask_d = df_lk[col_proy] == proy_d
-                                            vals_d = df_lk.loc[mask_d, cl].dropna()
-                                            if len(vals_d) == 0:
-                                                continue
+                                        for proy_d in proyectos_a:
+                                            mask_d = (df_lk2[col_proy].astype(str).str.strip()
+                                                      == str(proy_d).strip())
+                                            vals_d = df_lk2.loc[mask_d, cl].dropna()
+                                            if len(vals_d) == 0: continue
                                             fila_d = {"Proyecto": str(proy_d)[:40],
                                                       "n": len(vals_d),
                                                       "Promedio": f"{vals_d.mean():.2f}"}
-                                            for v_esc in range(1, esc_max + 1):
-                                                pct_v = (vals_d == v_esc).mean() * 100
-                                                lbl = {1:"🔴 1", 2:"🟡 2", 3:"🟢 3",
-                                                       4:"🟢 4", 5:"🟢 5"}.get(v_esc, str(v_esc))
-                                                if esc_max == 3:
-                                                    lbl = {1:"🔴 En desacuerdo (1)",
-                                                           2:"🟡 Neutral (2)",
-                                                           3:"🟢 De acuerdo (3)"}.get(v_esc, str(v_esc))
-                                                elif esc_max == 5:
-                                                    lbl = {1:"🔴 Muy en desacuerdo (1)",
-                                                           2:"🟠 En desacuerdo (2)",
-                                                           3:"🟡 Neutral (3)",
-                                                           4:"🟢 De acuerdo (4)",
-                                                           5:"🟢 Muy de acuerdo (5)"}.get(v_esc, str(v_esc))
-                                                fila_d[lbl] = f"{pct_v:.0f}%"
+                                            etiq = ({1:"🔴 En desacuerdo (1)",
+                                                     2:"🟡 Neutral (2)",
+                                                     3:"🟢 De acuerdo (3)"}
+                                                    if esc_max==3 else
+                                                    {1:"🔴 Muy desacuerdo (1)",
+                                                     2:"🟠 En desacuerdo (2)",
+                                                     3:"🟡 Neutral (3)",
+                                                     4:"🟢 De acuerdo (4)",
+                                                     5:"🟢 Muy de acuerdo (5)"})
+                                            for v_e in range(1, esc_max+1):
+                                                fila_d[etiq[v_e]] = (
+                                                    f"{(vals_d==v_e).mean()*100:.0f}%")
                                             filas_dist.append(fila_d)
                                         if filas_dist:
                                             st.dataframe(
                                                 pd.DataFrame(filas_dist).set_index("Proyecto"),
                                                 use_container_width=True)
 
-                                # Acumular para exportar y triangulación
-                                for proy_g in promedios.index:
-                                    fila_c  = {"Proyecto": proy_g, "Grupo": gr}
-                                    fila_ac = {"Proyecto": proy_g, "Grupo": gr}
-                                    for cl in cols_lk_disp:
-                                        v   = promedios.loc[proy_g, cl]
-                                        n   = int(conteos.loc[proy_g, cl])
-                                        av  = " ⚠️indiv." if n <= 2 else ""
-                                        fila_c[f"{cl} (n={n}{av})"]  = semaforo_likert(v, esc_max)
-                                        fila_ac[f"{cl}"] = f"{(df_lk[df_lk[col_proy]==proy_g][cl]==esc_max).mean()*100:.0f}%"
-                                    filas_consolidado.append(fila_c)
-                                    filas_acuerdo.append(fila_ac)
+                        # Acumular filas_acuerdo para Excel
+                        for proy_g in proyectos_a:
+                            for gr in grupos_disponibles:
+                                fila_ac = {"Proyecto": proy_g, "Grupo": gr}
+                                for cl in cols_lk_por_grupo.get(gr, cols_lk):
+                                    dato = datos_pivot.get((str(proy_g), cl, gr))
+                                    if dato:
+                                        fila_ac[cl] = f"{(dato['prom']/esc_max*100):.0f}%"
+                                    else:
+                                        fila_ac[cl] = "Sin dato"
+                                filas_acuerdo.append(fila_ac)
 
-                                # Heatmap
-                                fig_hm = px.imshow(
-                                    promedios.T,
-                                    color_continuous_scale="RdYlGn",
-                                    zmin=1, zmax=esc_max, text_auto=".2f",
-                                    title=f"Mapa de calor — {gr}",
-                                    aspect="auto",
-                                    labels={"x": "Proyecto", "y": "Indicador", "color": "Promedio"})
-                                st.plotly_chart(fig_hm, use_container_width=True)
-                            else:
-                                # Sin columna de proyecto: análisis global
-                                cols_lk_disp = [c for c in cols_lk if c in df_lk.columns]
-                                promedios_g = df_lk[cols_lk_disp].mean().round(2)
-                                st.write(f"**{gr}** — Análisis global (sin columna de proyecto):")
-                                st.dataframe(promedios_g.to_frame("Promedio"), use_container_width=True)
-
-                    # ── Fase 2: Sí/No — usando groupby ────────────
+                    # ── Fase 2: Sí/No ─────────────────────────────
                     if cols_sn:
                         st.subheader("✅ Preguntas Sí / No")
                         for gr, df_g in dfs_ok.items():
@@ -1858,25 +1944,27 @@ if modo == "📋 Encuesta":
                                 pct_sn = (df_sn.groupby(col_proy)[cols_sn_disp]
                                          .mean() * 100).round(1)
                                 st.write(f"**{gr}** — % de respuestas Sí:")
-                                st.dataframe(pct_sn.applymap(lambda v: f"{v:.0f}%"
-                                    if pd.notna(v) else "—"), use_container_width=True)
+                                st.dataframe(pct_sn.applymap(
+                                    lambda v: f"{v:.0f}%" if pd.notna(v) else "—"),
+                                    use_container_width=True)
                                 for proy_g in pct_sn.index:
                                     fila_sn = {"Proyecto": proy_g, "Grupo": gr}
                                     for cs in cols_sn_disp:
                                         fila_sn[cs] = f"{pct_sn.loc[proy_g,cs]:.0f}% Sí"
                                     filas_sino.append(fila_sn)
 
-                    # ── Fase 2: Calificación 1-5 — usando groupby ──
+                    # ── Fase 2: Calificación 1-5 ──────────────────
                     if col_cal:
                         st.subheader("⭐ Calificación general 1-5")
                         for gr, df_g in dfs_ok.items():
                             _col_cal_gr = col_cal_por_grupo.get(gr, col_cal)
-                            if not _col_cal_gr or _col_cal_gr not in df_g.columns:
-                                continue
+                            if not _col_cal_gr or _col_cal_gr not in df_g.columns: continue
                             df_cal = df_g.copy()
-                            df_cal[_col_cal_gr] = pd.to_numeric(df_cal[_col_cal_gr], errors="coerce")
+                            df_cal[_col_cal_gr] = pd.to_numeric(
+                                df_cal[_col_cal_gr], errors="coerce")
                             if col_proy and col_proy in df_cal.columns:
-                                cal_grp = df_cal.groupby(col_proy)[_col_cal_gr].agg(["mean","count"])
+                                cal_grp = df_cal.groupby(col_proy)[_col_cal_gr].agg(
+                                    ["mean","count"])
                                 cal_grp.columns = ["Promedio","n"]
                                 cal_grp["Semáforo"] = cal_grp["Promedio"].apply(semaforo_rating)
                                 st.write(f"**{gr}** — Calificación 1-5 por proyecto:")
@@ -1885,93 +1973,73 @@ if modo == "📋 Encuesta":
                                     av = " ⚠️indiv." if row_c["n"] <= 2 else ""
                                     filas_cal.append({
                                         "Proyecto": proy_g, "Grupo": gr,
-                                        f"Calificación (n={int(row_c['n'])}{av})": row_c["Semáforo"]})
+                                        f"Calificación (n={int(row_c['n'])}{av})":
+                                        row_c["Semáforo"]})
 
-                    # ── Fase 3: Triangulación — con mapeador de equivalencias ─
+                    # ── Fase 3: Triangulación ─────────────────────
                     if len(dfs_ok) >= 2:
                         st.subheader("🔺 Fase 3 — Triangulación entre grupos")
                         umbral_t = 0.5 if esc_max == 3 else 1.0
-
-                        # Detectar columnas comunes entre grupos (mismo nombre)
                         cols_comunes_tri = set(cols_lk_por_grupo.get(list(dfs_ok.keys())[0], []))
                         for gr_tri in list(dfs_ok.keys())[1:]:
                             cols_comunes_tri &= set(cols_lk_por_grupo.get(gr_tri, []))
-
-                        # Detectar si hay columnas distintas entre grupos
                         todas_cols_lk = set(c for v in cols_lk_por_grupo.values() for c in v)
                         hay_cols_distintas = len(todas_cols_lk) > len(cols_comunes_tri)
-
-                        # Mapeador de equivalencias (solo si hay columnas distintas)
-                        mapa_tri = {}  # {"Criterio A": {"Comunidad": "col1", "Aliados": "col2"}}
+                        mapa_tri = {}
 
                         if hay_cols_distintas and todas_cols_lk:
-                            with st.expander(
-                                    "⚙️ Mapeador de equivalencias para triangulación "
-                                    "(los grupos tienen preguntas distintas)", expanded=True):
-                                st.caption(
-                                    "Cada fila es un criterio de triangulación. "
-                                    "Selecciona qué pregunta de cada grupo corresponde "
-                                    "al mismo concepto. Deja '(no aplica)' si un grupo "
-                                    "no tiene esa pregunta.")
+                            with st.expander("⚙️ Mapeador de equivalencias", expanded=True):
+                                st.caption("Selecciona qué pregunta de cada grupo mide el mismo "
+                                           "concepto. Deja '(no aplica)' si un grupo no la tiene.")
                                 n_criterios = st.number_input(
-                                    "¿Cuántos criterios quieres triangular?",
-                                    min_value=1, max_value=10, value=min(3, len(todas_cols_lk)),
-                                    step=1)
+                                    "¿Cuántos criterios triangular?",
+                                    min_value=1, max_value=10,
+                                    value=min(3, len(todas_cols_lk)), step=1)
                                 for idx_crit in range(int(n_criterios)):
-                                    st.markdown(f"**Criterio {idx_crit + 1}**")
+                                    st.markdown(f"**Criterio {idx_crit+1}**")
                                     nombre_crit = st.text_input(
-                                        "Nombre del criterio (ej: Pertinencia territorial):",
+                                        "Nombre del criterio:",
                                         key=f"crit_nombre_{idx_crit}",
                                         placeholder="Ej: Pertinencia territorial")
                                     if not nombre_crit:
-                                        nombre_crit = f"Criterio {idx_crit + 1}"
+                                        nombre_crit = f"Criterio {idx_crit+1}"
                                     cols_crit_tri = st.columns(len(dfs_ok))
                                     mapa_tri[nombre_crit] = {}
-                                    for i_gr, (gr_m, df_gm) in enumerate(dfs_ok.items()):
-                                        opciones_m = (["(no aplica)"] +
-                                                      cols_lk_por_grupo.get(gr_m, []))
+                                    for i_gr, (gr_m, _) in enumerate(dfs_ok.items()):
+                                        opciones_m = ["(no aplica)"] + cols_lk_por_grupo.get(gr_m,[])
                                         with cols_crit_tri[i_gr]:
-                                            sel_m = st.selectbox(
-                                                f"{gr_m}:", opciones_m,
-                                                key=f"crit_{idx_crit}_{gr_m}")
+                                            sel_m = st.selectbox(f"{gr_m}:", opciones_m,
+                                                                  key=f"crit_{idx_crit}_{gr_m}")
                                             if sel_m != "(no aplica)":
                                                 mapa_tri[nombre_crit][gr_m] = sel_m
                         elif cols_comunes_tri:
-                            # Todas las columnas comunes se triangulan automáticamente
-                            st.caption(
-                                f"✅ {len(cols_comunes_tri)} pregunta(s) con el mismo nombre "
-                                f"en todos los grupos — triangulación automática. "
-                                f"Convergencia = diferencia MAX-MIN ≤ {umbral_t}")
+                            st.caption(f"✅ {len(cols_comunes_tri)} preguntas comunes — "
+                                       f"triangulación automática. Convergencia ≤ {umbral_t}")
                             for cl_c in sorted(cols_comunes_tri):
                                 mapa_tri[cl_c] = {gr: cl_c for gr in dfs_ok}
 
-                        # Ejecutar triangulación con el mapa
-                        if not mapa_tri:
-                            st.info(
-                                "Configura el mapeador de equivalencias arriba "
-                                "para ejecutar la triangulación.")
-                        else:
+                        if mapa_tri:
                             st.caption(f"Convergencia = diferencia MAX-MIN ≤ {umbral_t}")
+                            max_divergencia = 0.0
                             for criterio, col_por_gr in mapa_tri.items():
-                                if len(col_por_gr) < 2:
-                                    continue  # necesita al menos 2 grupos
-                                datos_tri = {}
+                                if len(col_por_gr) < 2: continue
+                                datos_tri_c = {}
                                 for gr_t, cl_t in col_por_gr.items():
                                     df_gt = dfs_ok.get(gr_t)
-                                    if df_gt is None or cl_t not in df_gt.columns:
-                                        continue
-                                    if not (col_proy and col_proy in df_gt.columns):
-                                        continue
+                                    if df_gt is None or cl_t not in df_gt.columns: continue
+                                    if not (col_proy and col_proy in df_gt.columns): continue
                                     df_tmp_t = df_gt.copy()
                                     df_tmp_t[cl_t] = df_tmp_t[cl_t].apply(
                                         lambda x: texto_a_likert(x, esc_max))
                                     for proy_g, v in df_tmp_t.groupby(col_proy)[cl_t].mean().items():
                                         if pd.notna(v):
-                                            datos_tri.setdefault(str(proy_g), {})[gr_t] = round(v, 2)
+                                            datos_tri_c.setdefault(
+                                                str(proy_g), {})[gr_t] = round(v, 2)
 
-                                for proy_g, vals_t in datos_tri.items():
+                                for proy_g, vals_t in datos_tri_c.items():
                                     if len(vals_t) >= 2:
                                         rng_t = max(vals_t.values()) - min(vals_t.values())
+                                        max_divergencia = max(max_divergencia, rng_t)
                                         fila_tri = {
                                             "Proyecto": proy_g,
                                             "Criterio": criterio,
@@ -1979,185 +2047,302 @@ if modo == "📋 Encuesta":
                                             "Resultado": convergencia(rng_t, esc_max)}
                                         for gr_t in dfs_ok:
                                             fila_tri[gr_t] = vals_t.get(gr_t, "Sin dato")
+                                        # Proyectos sin datos de algún grupo
+                                        grupos_sin_dato = [g for g in dfs_ok
+                                                           if g not in vals_t]
+                                        if grupos_sin_dato:
+                                            fila_tri["Grupos sin dato"] = ", ".join(grupos_sin_dato)
                                         filas_tri.append(fila_tri)
 
                             if filas_tri:
                                 df_tri_enc = pd.DataFrame(filas_tri)
-                                # Reordenar columnas: Proyecto, Criterio, grupos..., Rango, Resultado
-                                cols_ord = (["Proyecto", "Criterio"] +
+                                cols_ord = (["Proyecto","Criterio"] +
                                             [g for g in dfs_ok if g in df_tri_enc.columns] +
-                                            ["Rango MAX-MIN", "Resultado"])
+                                            ["Rango MAX-MIN","Resultado","Grupos sin dato"]
+                                            if "Grupos sin dato" in df_tri_enc.columns
+                                            else ["Proyecto","Criterio"] +
+                                            [g for g in dfs_ok if g in df_tri_enc.columns] +
+                                            ["Rango MAX-MIN","Resultado"])
                                 cols_ord = [c for c in cols_ord if c in df_tri_enc.columns]
                                 st.dataframe(df_tri_enc[cols_ord], use_container_width=True)
                                 n_div = df_tri_enc["Resultado"].str.contains("Divergencia").sum()
                                 n_conv = df_tri_enc["Resultado"].str.contains("Convergencia").sum()
-                                col_res1, col_res2 = st.columns(2)
-                                with col_res1:
-                                    st.metric("✅ Convergencias", n_conv)
-                                with col_res2:
-                                    st.metric("⚠️ Divergencias", n_div)
-                            else:
-                                st.info(
-                                    "No hay datos suficientes para triangular. "
-                                    "Verifica que la columna de proyecto esté configurada "
-                                    "y que los grupos tengan datos en común.")
+                                col_r1, col_r2 = st.columns(2)
+                                with col_r1: st.metric("✅ Convergencias", n_conv)
+                                with col_r2: st.metric("⚠️ Divergencias", n_div)
 
-                    # ── Fase 3: Cualitativo — clasificación en un solo paso ──
+                    # ── SEMÁFORO DE RIESGO SOCIAL Y REPUTACIONAL ──
+                    st.subheader("🚨 Semáforo de riesgo social y reputacional")
+                    st.caption("Evalúa el nivel de riesgo basado en divergencias entre grupos, "
+                               "baja calificación general y patrones de insatisfacción.")
+                    n_div_riesgo    = sum(1 for f in filas_tri if "Divergencia" in str(f.get("Resultado","")))
+                    div_max_riesgo  = max((f.get("Rango MAX-MIN",0) for f in filas_tri), default=0.0)
+                    nivel_riesgo    = semaforo_riesgo(div_max_riesgo, n_div_riesgo)
+
+                    # Indicadores críticos (🔴) en la vista consolidada
+                    n_criticos = sum(1 for f in filas_consolidado
+                                     if "🔴" in str(f.get("Semáforo","")))
+                    pct_criticos = round(n_criticos / max(len(filas_consolidado),1) * 100, 1)
+
+                    col_r1, col_r2, col_r3 = st.columns(3)
+                    with col_r1:
+                        st.metric("Nivel de riesgo global", nivel_riesgo)
+                    with col_r2:
+                        st.metric("Divergencias detectadas", f"{n_div_riesgo}")
+                    with col_r3:
+                        st.metric("Indicadores críticos 🔴", f"{n_criticos} ({pct_criticos}%)")
+
+                    # Riesgo por proyecto
+                    if filas_tri:
+                        riesgo_proy = {}
+                        for f in filas_tri:
+                            p = f.get("Proyecto","")
+                            if "Divergencia" in str(f.get("Resultado","")):
+                                riesgo_proy[p] = riesgo_proy.get(p, 0) + 1
+                        if riesgo_proy:
+                            df_risk = pd.DataFrame(
+                                [{"Proyecto": p, "Divergencias": n,
+                                  "Nivel": semaforo_riesgo(div_max_riesgo, n)}
+                                 for p, n in sorted(riesgo_proy.items(),
+                                                    key=lambda x: -x[1])])
+                            st.dataframe(df_risk, use_container_width=True)
+                            filas_riesgo = df_risk.to_dict("records")
+
+                    # ── ALERTAS AUTOMÁTICAS ───────────────────────
+                    st.subheader("🔔 Alertas automáticas")
+                    alertas_enc = []
+
+                    # Proyectos con todos los indicadores críticos
+                    proy_criticos = {}
+                    for f in filas_consolidado:
+                        if "🔴" in str(f.get("Semáforo","")):
+                            p = f.get("Proyecto","")
+                            proy_criticos[p] = proy_criticos.get(p, 0) + 1
+                    for p, n_c in proy_criticos.items():
+                        if n_c >= 2:
+                            alertas_enc.append(
+                                f"🔴 **{p}**: {n_c} indicadores críticos — requiere atención prioritaria.")
+
+                    # n muy pequeño
+                    proy_n_bajo = set()
+                    for f in filas_consolidado:
+                        if f.get("n",99) <= 2:
+                            proy_n_bajo.add(f.get("Proyecto",""))
+                    if proy_n_bajo:
+                        alertas_enc.append(
+                            f"⚠️ Proyectos con n≤2 respondentes (perspectiva individual, "
+                            f"no estadísticamente representativa): "
+                            f"{', '.join(sorted(proy_n_bajo))}")
+
+                    # Proyectos sin datos de algún grupo
+                    proyectos_sin_grupo = {}
+                    for f in filas_consolidado:
+                        if f.get("n",1) == 0:
+                            p = f.get("Proyecto","")
+                            g = f.get("Grupo","")
+                            proyectos_sin_grupo.setdefault(p, []).append(g)
+                    for p, gs in proyectos_sin_grupo.items():
+                        alertas_enc.append(
+                            f"ℹ️ **{p}** no tiene datos de: {', '.join(gs)}. "
+                            f"La triangulación es parcial para este proyecto.")
+
+                    # Divergencias altas
+                    if n_div_riesgo > 0:
+                        alertas_enc.append(
+                            f"⚠️ {n_div_riesgo} divergencia(s) detectada(s) entre grupos. "
+                            f"Revisar triangulación.")
+
+                    filas_alertas = alertas_enc
+                    if alertas_enc:
+                        for alerta in alertas_enc:
+                            st.warning(alerta)
+                    else:
+                        st.success("✅ No se detectaron alertas en este análisis.")
+
+                    # ── ANÁLISIS POR ROL ──────────────────────────
+                    if col_rol:
+                        st.subheader("👤 Análisis por rol del respondente")
+                        st.caption("Compara los promedios Likert según el rol de quien responde "
+                                   "(líder JAC, beneficiario, madre cabeza de hogar, etc.)")
+                        for gr, df_g in dfs_ok.items():
+                            if col_rol not in df_g.columns: continue
+                            df_rol = df_g.copy()
+                            cols_lk_gr = [c for c in cols_lk_por_grupo.get(gr, cols_lk)
+                                          if c in df_rol.columns]
+                            for cl in cols_lk_gr:
+                                df_rol[cl] = df_rol[cl].apply(
+                                    lambda x: texto_a_likert(x, esc_max))
+                            if cols_lk_gr:
+                                rol_grp = df_rol.groupby(col_rol)[cols_lk_gr].mean().round(2)
+                                st.write(f"**{gr}** — Promedio Likert por rol:")
+                                st.dataframe(rol_grp, use_container_width=True)
+                                fig_rol = px.bar(
+                                    rol_grp.reset_index().melt(
+                                        id_vars=col_rol, var_name="Indicador",
+                                        value_name="Promedio"),
+                                    x=col_rol, y="Promedio", color="Indicador",
+                                    barmode="group",
+                                    title=f"Promedios por rol — {gr}",
+                                    color_discrete_sequence=px.colors.qualitative.Pastel)
+                                fig_rol.update_layout(height=380)
+                                fig_rol.add_hline(y=esc_max*0.9, line_dash="dot",
+                                                  line_color="green")
+                                st.plotly_chart(fig_rol, use_container_width=True)
+                                for _, row_rol in rol_grp.iterrows():
+                                    filas_rol.append({
+                                        "Grupo": gr,
+                                        "Rol": row_rol.name,
+                                        **{cl: round(row_rol[cl],2) for cl in cols_lk_gr
+                                           if pd.notna(row_rol[cl])}})
+
+                    # ── Fase 3: Cualitativo ───────────────────────
                     if cols_txt:
                         st.subheader("💬 Fase 3 — Análisis cualitativo")
-
-                        # Paso 1: recopilar todos los textos con metadata
-                        registros_cual = []  # [{idx, gr, ct, proy, texto}]
+                        registros_cual = []
                         for gr, df_g in dfs_ok.items():
                             _cols_txt_gr = cols_txt_por_grupo.get(gr, cols_txt)
                             for ct in _cols_txt_gr:
-                                if ct not in df_g.columns:
-                                    continue
-                                for idx_row, row_ct in df_g.iterrows():
-                                    txt_ct = str(row_ct.get(ct, "")).strip()
-                                    if not txt_ct or txt_ct == "nan" or len(txt_ct) < 3:
-                                        continue
-                                    proy_ct = (str(row_ct.get(col_proy, "N/A"))
+                                if ct not in df_g.columns: continue
+                                for _, row_ct in df_g.iterrows():
+                                    txt_ct = str(row_ct.get(ct,"")).strip()
+                                    if not txt_ct or txt_ct=="nan" or len(txt_ct)<3: continue
+                                    proy_ct = (str(row_ct.get(col_proy,"N/A"))
                                                if col_proy and col_proy in df_g.columns
                                                else "N/A")
+                                    rol_ct = (str(row_ct.get(col_rol,"N/A"))
+                                              if col_rol and col_rol in df_g.columns
+                                              else "N/A")
                                     registros_cual.append({
                                         "idx": len(registros_cual),
                                         "Grupo": gr, "Columna": ct,
-                                        "Proyecto": proy_ct, "Texto": txt_ct})
+                                        "Proyecto": proy_ct, "Rol": rol_ct,
+                                        "Texto": txt_ct})
 
-                        # Paso 2: clasificar por keywords primero
                         temas_disponibles = list(KEYWORDS_TEMAS.keys())
-                        temas_norm = {normalizar_str(t): t for t in temas_disponibles}
-
                         for reg in registros_cual:
                             reg["Tema"] = clasificar_texto_enc(reg["Texto"])[0]
 
-                        # Paso 3: los que quedaron "Sin clasificar" → IA en lotes
-                        sin_cl_idx = [r for r in registros_cual if r["Tema"] == "Sin clasificar"]
-
+                        sin_cl_idx = [r for r in registros_cual
+                                      if r["Tema"] == "Sin clasificar"]
                         if sin_cl_idx:
                             temas_str_lk = "\n".join(f"{i+1}. {t}"
-                                                      for i, t in enumerate(temas_disponibles))
+                                for i,t in enumerate(temas_disponibles))
                             with st.spinner(f"Clasificando {len(sin_cl_idx)} respuestas con IA..."):
                                 for inicio in range(0, len(sin_cl_idx), 20):
-                                    lote = sin_cl_idx[inicio:inicio + 15]
+                                    lote = sin_cl_idx[inicio:inicio+20]
                                     textos_lote = "\n".join(
                                         f"{i+1}. {r['Texto'][:150]}"
-                                        for i, r in enumerate(lote))
+                                        for i,r in enumerate(lote))
                                     prompt_cl = (
-                                        "Eres un experto en análisis de inversión social comunitaria.\n"
-                                        "Tienes esta lista de temas numerados:\n"
-                                        + temas_str_lk + "\n\n"
-                                        "Para cada respuesta, escribe SOLO el número del tema "
-                                        "que mejor corresponda.\n"
-                                        "IMPORTANTE: siempre elige el tema más cercano. "
-                                        "Nunca escribas 0 — si la respuesta es corta o vaga, "
-                                        "asigna el tema más probable en contexto de proyectos comunitarios.\n\n"
+                                        "Eres experto en análisis de inversión social comunitaria.\n"
+                                        "Temas numerados:\n" + temas_str_lk + "\n\n"
+                                        "Para cada respuesta escribe SOLO el número del tema más cercano. "
+                                        "Nunca escribas 0.\n\n"
                                         "Respuestas:\n" + textos_lote + "\n\n"
                                         "Una línea por respuesta, solo el número:\n"
-                                        "1. 3\n2. 7\n3. 12\nSolo el número, sin explicaciones.")
+                                        "1. 3\n2. 7\nSin explicaciones.")
                                     try:
                                         resp_cl = client.chat.complete(
                                             model="mistral-small-latest",
-                                            messages=[{"role": "user", "content": prompt_cl}],
+                                            messages=[{"role":"user","content":prompt_cl}],
                                             max_tokens=100)
-                                        lineas_cl = resp_cl.choices[0].message.content.strip().split("\n")
+                                        lineas_cl = (resp_cl.choices[0].message.content
+                                                     .strip().split("\n"))
                                         for i, reg in enumerate(lote):
-                                            if i >= len(lineas_cl):
-                                                break
-                                            linea = lineas_cl[i].strip()
-                                            # Extraer el número de la línea (ej: "1. 3" → "3")
-                                            num_str = linea.split(".")[-1].strip()
+                                            if i >= len(lineas_cl): break
+                                            num_str = lineas_cl[i].strip().split(".")[-1].strip()
                                             try:
                                                 num = int(num_str)
                                                 if 1 <= num <= len(temas_disponibles):
-                                                    reg["Tema"] = temas_disponibles[num - 1] + " (IA)"
+                                                    reg["Tema"] = temas_disponibles[num-1]+" (IA)"
                                                 else:
-                                                    # 0 o fuera de rango: asignar "Mejora y sugerencias"
                                                     reg["Tema"] = "Mejora y sugerencias (IA)"
                                             except (ValueError, IndexError):
-                                                # Respuesta no numérica: intentar parsear texto
                                                 for t in temas_disponibles:
                                                     if normalizar_str(t) in normalizar_str(num_str):
-                                                        reg["Tema"] = t + " (IA)"
-                                                        break
+                                                        reg["Tema"] = t+" (IA)"; break
                                                 else:
                                                     reg["Tema"] = "Mejora y sugerencias (IA)"
                                     except Exception:
-                                        pass  # lote falla → quedan Sin clasificar
+                                        pass
 
-                        # Paso 4: construir filas_cual y sin_clasificar_enc
                         for reg in registros_cual:
                             filas_cual.append({
-                                "Grupo":    reg["Grupo"],
-                                "Proyecto": reg["Proyecto"],
-                                "Columna":  reg["Columna"],
-                                "Tema":     reg["Tema"],
-                                "Texto":    reg["Texto"][:200]})
+                                "Grupo": reg["Grupo"], "Proyecto": reg["Proyecto"],
+                                "Rol": reg["Rol"], "Columna": reg["Columna"],
+                                "Tema": reg["Tema"], "Texto": reg["Texto"][:200]})
                             if reg["Tema"] == "Sin clasificar":
                                 sin_clasificar_enc.append({
-                                    "Grupo":   reg["Grupo"],
-                                    "Columna": reg["Columna"],
-                                    "Texto":   reg["Texto"]})
+                                    "Grupo": reg["Grupo"], "Columna": reg["Columna"],
+                                    "Texto": reg["Texto"]})
 
-                        # Paso 5: mostrar resultados
                         if filas_cual:
                             df_cual = pd.DataFrame(filas_cual)
-                            clasificados   = df_cual[df_cual["Tema"] != "Sin clasificar"]
-                            n_sin_cl       = (df_cual["Tema"] == "Sin clasificar").sum()
-                            n_ia           = df_cual["Tema"].str.endswith("(IA)").sum()
-                            total_txt      = len(df_cual)
-
+                            clasificados = df_cual[df_cual["Tema"] != "Sin clasificar"]
+                            n_sin_cl = (df_cual["Tema"] == "Sin clasificar").sum()
+                            n_ia     = df_cual["Tema"].str.endswith("(IA)").sum()
+                            total_txt_c = len(df_cual)
                             st.caption(
-                                f"Total respuestas: {total_txt} | "
-                                f"Clasificadas por palabras clave: {total_txt - n_sin_cl - n_ia} | "
-                                f"Clasificadas por IA: {n_ia} | "
-                                f"Sin clasificar: {n_sin_cl}")
+                                f"Total: {total_txt_c} | "
+                                f"Keywords: {total_txt_c-n_sin_cl-n_ia} | "
+                                f"IA: {n_ia} | Sin clasificar: {n_sin_cl}")
 
-                            top_temas = (clasificados["Tema"].str.replace(" (IA)", "", regex=False)
+                            top_temas = (clasificados["Tema"]
+                                        .str.replace(" (IA)","",regex=False)
                                         .value_counts().head(14).reset_index())
-                            top_temas.columns = ["Tema", "Frecuencia"]
+                            top_temas.columns = ["Tema","Frecuencia"]
                             fig_t = px.bar(top_temas, x="Frecuencia", y="Tema",
                                           orientation="h",
-                                          title="Temas más frecuentes en respuestas abiertas",
-                                          color="Frecuencia", color_continuous_scale="Blues")
+                                          title="Temas más frecuentes",
+                                          color="Frecuencia",
+                                          color_continuous_scale="Blues")
                             fig_t.update_layout(yaxis=dict(autorange="reversed"))
                             st.plotly_chart(fig_t, use_container_width=True)
 
+                            # Temas por rol (si está configurado)
+                            if col_rol and "Rol" in df_cual.columns:
+                                temas_rol = (clasificados.groupby(["Rol","Tema"])
+                                            .size().reset_index(name="n"))
+                                if not temas_rol.empty:
+                                    with st.expander("👤 Temas por rol del respondente"):
+                                        fig_trol = px.bar(
+                                            temas_rol, x="n", y="Tema",
+                                            color="Rol", orientation="h",
+                                            barmode="group",
+                                            title="Temas mencionados por rol")
+                                        st.plotly_chart(fig_trol, use_container_width=True)
+
                             if sin_clasificar_enc:
-                                with st.expander(
-                                        f"⚠️ {len(sin_clasificar_enc)} respuestas Sin clasificar "
-                                        f"({len(sin_clasificar_enc)*100//total_txt}% del total)"):
+                                with st.expander(f"⚠️ {len(sin_clasificar_enc)} Sin clasificar"):
                                     st.dataframe(pd.DataFrame(sin_clasificar_enc),
                                                  use_container_width=True)
-                                    st.caption(
-                                        "Estas respuestas son muy cortas, muy genéricas o "
-                                        "mencionan temas fuera del diccionario. "
-                                        "Puedes reclasificarlas manualmente en la hoja "
-                                        "5_Abiertas del Excel descargado.")
 
                     # ── Fase 4: Informe IA ────────────────────────
                     st.subheader("📄 Fase 4 — Informe ejecutivo IA")
                     resumen_ia = (f"Organización: {org_enc} | Cliente: {cli_enc}\n"
                                   f"Municipios: {mun_enc} | Período: {per_enc}\n"
                                   f"Grupos: {', '.join(dfs_ok.keys())}\n"
-                                  f"Proyectos: {', '.join(str(p) for p in proyectos_a[:15])}\n")
+                                  f"Proyectos: {', '.join(str(p) for p in proyectos_a[:15])}\n"
+                                  f"Nivel de riesgo social: {nivel_riesgo if 'nivel_riesgo' in vars() else 'N/A'}\n"
+                                  f"Divergencias: {n_div_riesgo if 'n_div_riesgo' in vars() else 0}\n")
                     if filas_consolidado:
-                        resumen_ia += f"\nPromedios Likert:\n{pd.DataFrame(filas_consolidado).to_string(index=False)}\n"
-                    if filas_tri:
-                        n_div_ia = sum(1 for f in filas_tri if "Divergencia" in str(f.get("Resultado","")))
-                        resumen_ia += f"\nTriangulación: {len(filas_tri)} cruces, {n_div_ia} divergencias.\n"
+                        df_res_ia = pd.DataFrame(filas_consolidado)
+                        top_crit = df_res_ia[df_res_ia["Semáforo"].str.contains("🔴",na=False)].head(5)
+                        if not top_crit.empty:
+                            resumen_ia += f"\nIndicadores críticos:\n{top_crit[['Proyecto','Indicador','Grupo','Promedio']].to_string(index=False)}\n"
                     if filas_cual:
                         top_t_ia = (pd.DataFrame(filas_cual)[pd.DataFrame(filas_cual)["Tema"]!="Sin clasificar"]
                                     ["Tema"].value_counts().head(5).index.tolist())
-                        resumen_ia += f"\nTemas principales: {', '.join(top_t_ia)}\n"
+                        resumen_ia += f"\nTemas cualitativos principales: {', '.join(top_t_ia)}\n"
+                    if alertas_enc:
+                        resumen_ia += f"\nAlertas detectadas:\n" + "\n".join(alertas_enc[:5]) + "\n"
 
                     with st.spinner("Generando informe con IA..."):
                         informe_enc = generar_informe_ia(resumen_ia, contexto_enc)
                         st.session_state.informe_enc = informe_enc
                     st.markdown(informe_enc)
 
-                    # ── Descarga Excel con fórmulas ───────────────
+                    # ── Descarga Excel ────────────────────────────
                     st.subheader("⬇ Descargas")
                     cfg_dict = {
                         "organizacion": org_enc, "cliente": cli_enc,
@@ -2167,15 +2352,80 @@ if modo == "📋 Encuesta":
                         "col_cal": col_cal,      "cols_texto": cols_txt,
                         "proyectos_lista": proyectos_a,
                     }
-                    res_dict = {
-                        "filas_consolidado": filas_consolidado,
-                        "filas_tri": filas_tri,
-                        "filas_cual": filas_cual,
-                        "sin_clasificar": sin_clasificar_enc,
-                    }
 
                     with st.spinner("Construyendo Excel con fórmulas..."):
-                        wb_enc = crear_excel_encuesta_formulas(dfs_ok, cfg_dict, res_dict)
+                        wb_enc = crear_excel_encuesta_formulas(dfs_ok, cfg_dict, {})
+                        # Agregar hojas extra con los nuevos datos
+                        from openpyxl import Workbook as _WB
+
+                        def _hoja_extra(wb, nombre, df, titulo=None):
+                            ws = wb.create_sheet(nombre)
+                            if titulo:
+                                ws.cell(1,1).value = titulo
+                                xlsx_header(ws.cell(1,1), bg=C_AZUL1)
+                                ws.merge_cells(f"A1:{get_column_letter(len(df.columns))}1")
+                                ri_start = 2
+                            else:
+                                ri_start = 1
+                            for ci, h in enumerate(df.columns, 1):
+                                xlsx_header(ws.cell(ri_start, ci))
+                                ws.cell(ri_start, ci).value = h
+                                ws.column_dimensions[get_column_letter(ci)].width = max(14, len(str(h))+4)
+                            for ri, (_, row) in enumerate(df.iterrows(), ri_start+1):
+                                for ci, col in enumerate(df.columns, 1):
+                                    val = row[col]
+                                    ws.cell(ri, ci).value = val if pd.notna(val) else ""
+                                    xlsx_data(ws.cell(ri, ci))
+                            ws.freeze_panes = f"A{ri_start+1}"
+                            return ws
+
+                        # Vista consolidada
+                        if filas_consolidado:
+                            _hoja_extra(wb_enc, "Vista_consolidada",
+                                        pd.DataFrame(filas_consolidado),
+                                        "VISTA CONSOLIDADA — TODOS LOS PROYECTOS Y GRUPOS")
+                            # Semáforo en col Semáforo
+                            ws_vc = wb_enc["Vista_consolidada"]
+                            cols_vc = pd.DataFrame(filas_consolidado).columns.tolist()
+                            if "Semáforo" in cols_vc:
+                                sem_ci = cols_vc.index("Semáforo") + 1
+                                sem_ltr = get_column_letter(sem_ci)
+                                n_vc = len(filas_consolidado)
+                                semaforo_cf(ws_vc, f"{sem_ltr}3:{sem_ltr}{n_vc+2}", sem_ltr,
+                                    verde_formula=f'LEFT({sem_ltr}3,2)="🟢"',
+                                    amarillo_formula=f'LEFT({sem_ltr}3,2)="🟡"',
+                                    rojo_formula=f'LEFT({sem_ltr}3,2)="🔴"')
+
+                        # IAP
+                        if filas_iac_vista:
+                            _hoja_extra(wb_enc, "Indice_acuerdo_ponderado",
+                                        pd.DataFrame(filas_iac_vista),
+                                        "ÍNDICE DE ACUERDO PONDERADO vs PROMEDIO SIMPLE")
+
+                        # Riesgo social
+                        if filas_riesgo:
+                            _hoja_extra(wb_enc, "Riesgo_social",
+                                        pd.DataFrame(filas_riesgo),
+                                        f"SEMÁFORO DE RIESGO SOCIAL — Nivel global: {nivel_riesgo}")
+
+                        # Alertas
+                        if filas_alertas:
+                            df_alertas = pd.DataFrame({"Alerta": filas_alertas})
+                            _hoja_extra(wb_enc, "Alertas",
+                                        df_alertas, "ALERTAS AUTOMÁTICAS")
+
+                        # Análisis por rol
+                        if filas_rol:
+                            _hoja_extra(wb_enc, "Analisis_por_rol",
+                                        pd.DataFrame(filas_rol),
+                                        "ANÁLISIS POR ROL DEL RESPONDENTE")
+
+                        # Cualitativo completo (con Rol)
+                        if filas_cual:
+                            _hoja_extra(wb_enc, "Cualitativo_completo",
+                                        pd.DataFrame(filas_cual),
+                                        "ANÁLISIS CUALITATIVO COMPLETO")
+
                         buf_enc = io.BytesIO()
                         wb_enc.save(buf_enc)
                         buf_enc.seek(0)
