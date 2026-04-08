@@ -2624,6 +2624,47 @@ elif modo == "🗺️ Cartografía Social":
                     mapa = {g: f"Grupo {letras[i]}" for i,g in enumerate(gu)}
                     df_result.loc[mask,"grupo"] = df_result.loc[mask,"grupo_num"].map(mapa)
 
+                # Generar nombres descriptivos por grupo con IA
+                with st.spinner("Generando nombres descriptivos para grupos semánticos..."):
+                    nombres_grupos = {}
+                    for comp in cols_componentes:
+                        nombres_grupos[comp] = {}
+                        sub_comp = df_result[df_result["componente"]==comp]
+                        for grupo in sub_comp["grupo"].unique():
+                            frases_g = sub_comp[sub_comp["grupo"]==grupo]["frase"].tolist()[:8]
+                            muestra = "\n".join(f"- {f}" for f in frases_g)
+                            n_frases = len(sub_comp[sub_comp["grupo"]==grupo])
+                            prompt_g = (
+                                f"Eres un experto en cartografía social y análisis territorial IAP.\n"
+                                f"Estas {n_frases} frases fueron agrupadas por similitud semántica "
+                                f"en el componente '{comp}' de una cartografía social participativa:\n"
+                                f"{muestra}\n\n"
+                                f"Genera UN título descriptivo de máximo 7 palabras que capture "
+                                f"el tema central que comparten estas frases.\n"
+                                f"El título debe ser específico al contenido, no genérico.\n"
+                                f"Ejemplos buenos: 'Existencia de equipamientos básicos', "
+                                f"'Saneamiento básico del hogar', 'Estado de vías rurales'.\n"
+                                f"Responde SOLO con el título, sin explicaciones ni puntos."
+                            )
+                            try:
+                                resp_g = client.chat.complete(
+                                    model="mistral-small-latest",
+                                    messages=[{"role":"user","content":prompt_g}],
+                                    max_tokens=25)
+                                nombre = resp_g.choices[0].message.content.strip().strip(".")
+                                nombres_grupos[comp][grupo] = nombre
+                            except:
+                                nombres_grupos[comp][grupo] = grupo
+                    # Agregar columna de nombre descriptivo
+                    df_result["grupo_nombre"] = df_result.apply(
+                        lambda r: nombres_grupos.get(r["componente"], {}).get(r["grupo"], r["grupo"]),
+                        axis=1
+                    )
+                    # Actualizar grupo con formato: "Grupo A — Nombre descriptivo"
+                    df_result["grupo_display"] = df_result.apply(
+                        lambda r: f"{r['grupo']} — {r['grupo_nombre']}", axis=1
+                    )
+
                 with st.spinner("Asociando frases a líneas de inversión con IA..."):
                     ncomp = ["economico","social","ambiental","gobernanza","alianzas",
                              "proyeccion","governance","económico","proyección"]
@@ -2695,6 +2736,9 @@ elif modo == "🗺️ Cartografía Social":
                                         cols_componentes, default=cols_componentes)
 
             df_fil = df_result.copy()
+            # Usar grupo_display si existe, sino grupo
+            if "grupo_display" in df_fil.columns:
+                df_fil["grupo"] = df_fil["grupo_display"]
             if muni_f and "municipio" in df_fil.columns:
                 df_fil = df_fil[df_fil["municipio"].isin(muni_f)]
             if comp_f:
