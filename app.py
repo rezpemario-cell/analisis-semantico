@@ -38,7 +38,7 @@ client = Mistral(api_key=st.secrets["MISTRAL_API_KEY"])
 
 @st.cache_resource
 def cargar_modelo():
-    return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+    return SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 
 modelo = cargar_modelo()
 
@@ -347,6 +347,72 @@ def texto_a_likert(valor, escala_max):
     }
     mapa = mapa5 if escala_max == 5 else mapa3
     return mapa.get(str(valor).strip().lower(), np.nan)
+
+
+def analizar_sentimiento(texto):
+    """
+    Clasifica el sentimiento de un texto como Positivo, Negativo o Neutro.
+    Usa palabras clave contextualizadas para cartografía social y encuestas
+    de inversión social en Colombia.
+    Retorna: "😊 Positivo", "😔 Negativo" o "😐 Neutro"
+    """
+    t = normalizar_str(str(texto))
+
+    palabras_positivas = [
+        "bien","bueno","buena","excelente","muy bien","genial","perfecto",
+        "satisfecho","satisfecha","contento","contenta","feliz","alegre",
+        "gracias","agradecido","agradecida","agradecimiento","apoyo","apoya",
+        "beneficio","beneficia","mejoro","mejora","mejorado","avanzo","avanza",
+        "logro","logra","logrado","crecimiento","progreso","desarrollo",
+        "positivo","positiva","esperanza","confianza","unidad","union",
+        "participacion","organizado","organizada","fortalecido","fortalecida",
+        "importante","necesario","funciona","sirve","ayuda","bonito","bonita",
+        "lindo","hermoso","satisfactorio","cumplieron","cumplido","comprometidos",
+        "transparente","transparencia","informado","informada","incluido",
+        "reconocen","reconocidos","valorado","valorada","empoderado","liderazgo",
+    ]
+    palabras_negativas = [
+        "malo","mala","mal","peor","terrible","horrible","pesimo","pesima",
+        "problema","problemas","dificil","dificultad","falta","faltan","falta",
+        "no hay","no tiene","no tiene","sin","abandono","abandona","abandonaron",
+        "triste","tristeza","preocupa","preocupacion","miedo","temor","riesgo",
+        "daño","daños","deterioro","deteriora","empeorado","empeoro","decayo",
+        "negativo","negativa","insatisfecho","insatisfecha","molesto","molesta",
+        "queja","quejas","incumplimiento","incumplieron","prometieron","promesa",
+        "engaño","mentira","desconfianza","conflicto","tension","division",
+        "excluido","excluida","ignorado","ignorada","discriminado","marginal",
+        "pobreza","hambre","desigualdad","injusticia","impunidad",
+        "contaminacion","contamina","destruccion","destruye",
+        "cierre","cierran","retiro","retiran","abandonan","dejan solos",
+        "no cumple","no funciona","no sirve","no ayuda","no apoya",
+    ]
+
+    t_words = t.split()
+    score = 0
+    for p in palabras_positivas:
+        if p in t:
+            score += 1
+    for p in palabras_negativas:
+        if p in t:
+            score -= 1
+
+    # Negaciones: "no bueno", "nunca bien", etc.
+    negaciones = ["no ","nunca ","jamas ","tampoco ","sin ","ni "]
+    for i, word in enumerate(t_words):
+        if word in ["no","nunca","jamas","tampoco","ni"]:
+            # Siguiente palabra podría invertir sentimiento
+            if i + 1 < len(t_words):
+                siguiente = t_words[i+1]
+                if any(siguiente in p for p in palabras_positivas):
+                    score -= 2  # "no bueno" → más negativo
+                elif any(siguiente in p for p in palabras_negativas):
+                    score += 1  # "no malo" → menos negativo
+
+    if score > 0:
+        return "😊 Positivo"
+    elif score < 0:
+        return "😔 Negativo"
+    return "😐 Neutro"
 
 
 def clasificar_texto_enc(texto):
@@ -1070,7 +1136,7 @@ def crear_excel_cartografia_formulas(df_filtrado, comp_filtro, cat_por_component
     ws_dat = wb.create_sheet("Datos completos")
     cols_meta_e = [c for c in ["municipio","vereda","año","semestre"]
                    if c in df_filtrado.columns]
-    cols_dat = cols_meta_e + ["componente","frase","grupo","peso_semantico","lineas_inversion"]
+    cols_dat = cols_meta_e + ["componente","frase","grupo","peso_semantico","sentimiento","lineas_inversion"]
     cols_dat = [c for c in cols_dat if c in df_filtrado.columns]
     for ci, h in enumerate(cols_dat, 1):
         xlsx_header(ws_dat.cell(1, ci))
@@ -2234,6 +2300,7 @@ if modo == "📋 Encuesta":
                                         "idx": len(registros_cual),
                                         "Grupo": gr, "Columna": ct,
                                         "Proyecto": proy_ct, "Rol": rol_ct,
+                                        "Sentimiento": analizar_sentimiento(txt_ct),
                                         "Texto": txt_ct})
 
                         temas_disponibles = list(KEYWORDS_TEMAS.keys())
@@ -2286,9 +2353,13 @@ if modo == "📋 Encuesta":
 
                         for reg in registros_cual:
                             filas_cual.append({
-                                "Grupo": reg["Grupo"], "Proyecto": reg["Proyecto"],
-                                "Rol": reg["Rol"], "Columna": reg["Columna"],
-                                "Tema": reg["Tema"], "Texto": reg["Texto"][:200]})
+                                "Grupo":       reg["Grupo"],
+                                "Proyecto":    reg["Proyecto"],
+                                "Rol":         reg["Rol"],
+                                "Columna":     reg["Columna"],
+                                "Tema":        reg["Tema"],
+                                "Sentimiento": reg.get("Sentimiento","😐 Neutro"),
+                                "Texto":       reg["Texto"][:200]})
                             if reg["Tema"] == "Sin clasificar":
                                 sin_clasificar_enc.append({
                                     "Grupo": reg["Grupo"], "Columna": reg["Columna"],
@@ -2316,6 +2387,53 @@ if modo == "📋 Encuesta":
                                           color_continuous_scale="Blues")
                             fig_t.update_layout(yaxis=dict(autorange="reversed"))
                             st.plotly_chart(fig_t, use_container_width=True)
+
+                            # Sentimiento por grupo
+                            if "Sentimiento" in df_cual.columns:
+                                st.write("**😊 Distribución de sentimiento por grupo:**")
+                                sent_enc = (df_cual.groupby(["Grupo","Sentimiento"])
+                                            .size().reset_index(name="n"))
+                                sent_tot = (df_cual.groupby("Grupo")["Sentimiento"]
+                                            .count().reset_index(name="total"))
+                                sent_enc = sent_enc.merge(sent_tot, on="Grupo")
+                                sent_enc["Pct"] = (
+                                    sent_enc["n"]/sent_enc["total"]*100).round(1)
+                                fig_sent_enc = px.bar(
+                                    sent_enc, x="Grupo", y="Pct",
+                                    color="Sentimiento", barmode="stack",
+                                    title="Sentimiento por grupo de respondentes (%)",
+                                    color_discrete_map={
+                                        "😊 Positivo":"#2E8B57",
+                                        "😐 Neutro":"#B8B8B8",
+                                        "😔 Negativo":"#C0392B"},
+                                    text="Pct")
+                                fig_sent_enc.update_traces(
+                                    texttemplate="%{text:.0f}%",
+                                    textposition="inside")
+                                st.plotly_chart(fig_sent_enc, use_container_width=True)
+
+                                # Sentimiento por proyecto
+                                sent_proy = (df_cual.groupby(["Proyecto","Sentimiento"])
+                                             .size().reset_index(name="n"))
+                                sent_tot_p = (df_cual.groupby("Proyecto")["Sentimiento"]
+                                              .count().reset_index(name="total"))
+                                sent_proy = sent_proy.merge(sent_tot_p, on="Proyecto")
+                                sent_proy["Pct"] = (
+                                    sent_proy["n"]/sent_proy["total"]*100).round(1)
+                                fig_sent_p = px.bar(
+                                    sent_proy, x="Proyecto", y="Pct",
+                                    color="Sentimiento", barmode="stack",
+                                    title="Sentimiento por proyecto (%)",
+                                    color_discrete_map={
+                                        "😊 Positivo":"#2E8B57",
+                                        "😐 Neutro":"#B8B8B8",
+                                        "😔 Negativo":"#C0392B"},
+                                    text="Pct")
+                                fig_sent_p.update_traces(
+                                    texttemplate="%{text:.0f}%",
+                                    textposition="inside")
+                                fig_sent_p.update_layout(xaxis_tickangle=-30)
+                                st.plotly_chart(fig_sent_p, use_container_width=True)
 
                             # Temas por rol (si está configurado)
                             if col_rol and "Rol" in df_cual.columns:
@@ -2583,6 +2701,7 @@ elif modo == "🗺️ Cartografía Social":
                                 frases = [f.strip() for f in celda.split(".") if len(f.strip())>5]
                                 for frase in frases:
                                     reg = {"componente": comp, "frase": frase,
+                                           "sentimiento": analizar_sentimiento(frase),
                                            "lineas_disponibles": lineas_c}
                                     for cm in cols_meta:
                                         reg[cm] = fila.get(cm,"")
@@ -2610,6 +2729,7 @@ elif modo == "🗺️ Cartografía Social":
                         for i, (_, row_r) in enumerate(sub.iterrows()):
                             res = {"componente":comp,"frase":row_r["frase"],
                                    "grupo_num":clusters[i],"peso_semantico":pesos[i],
+                                   "sentimiento":row_r.get("sentimiento","😐 Neutro"),
                                    "lineas_disponibles":row_r["lineas_disponibles"]}
                             for cm in cols_meta:
                                 res[cm] = row_r.get(cm,"")
@@ -3007,6 +3127,46 @@ elif modo == "🗺️ Cartografía Social":
                     st.success("✅ No se detectaron tensiones internas significativas dentro de los mismos temas.")
             else:
                 st.info("ℹ️ No hay columna 'vereda' disponible para detectar tensiones.")
+
+            # ── Sentimiento por componente ────────────────────────
+            if "sentimiento" in df_fil.columns:
+                st.subheader("😊 Análisis de sentimiento por componente")
+                st.caption("Clasifica cada frase como Positiva, Negativa o Neutra "
+                           "según el vocabulario usado por los participantes.")
+
+                sent_comp = df_fil.groupby(["componente","sentimiento"]).size().reset_index(name="n")
+                sent_total = df_fil.groupby("componente")["sentimiento"].count().reset_index(name="total")
+                sent_comp = sent_comp.merge(sent_total, on="componente")
+                sent_comp["Porcentaje"] = (sent_comp["n"] / sent_comp["total"] * 100).round(1)
+
+                fig_sent = px.bar(
+                    sent_comp, x="componente", y="Porcentaje",
+                    color="sentimiento", barmode="stack",
+                    title="Distribución de sentimiento por componente (%)",
+                    color_discrete_map={
+                        "😊 Positivo": "#2E8B57",
+                        "😐 Neutro":   "#B8B8B8",
+                        "😔 Negativo": "#C0392B"},
+                    text="Porcentaje",
+                    labels={"componente":"Componente","Porcentaje":"%","sentimiento":"Sentimiento"})
+                fig_sent.update_traces(texttemplate="%{text:.0f}%", textposition="inside")
+                fig_sent.update_layout(height=420)
+                st.plotly_chart(fig_sent, use_container_width=True)
+
+                # Tabla resumen
+                sent_pivot = sent_comp.pivot_table(
+                    index="componente", columns="sentimiento",
+                    values="Porcentaje", fill_value=0).round(1)
+                sent_pivot.columns.name = None
+                st.dataframe(sent_pivot, use_container_width=True)
+
+                # Frases más negativas (alertas cualitativas)
+                frases_neg = df_fil[df_fil["sentimiento"]=="😔 Negativo"].nlargest(
+                    5, "peso_semantico")
+                if not frases_neg.empty:
+                    with st.expander(f"😔 Top {len(frases_neg)} frases negativas más relevantes"):
+                        for _, row_neg in frases_neg.iterrows():
+                            st.warning(f"**{row_neg['componente']}** — {row_neg['frase']}")
 
             # ── Frases representativas ────────────────────────────
             st.subheader("💬 Frases más representativas")
